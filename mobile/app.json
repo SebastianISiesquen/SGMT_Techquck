@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "SGGP Técnico",
+    "slug": "sggp-tecnico",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "pe.com.techquk.sggp"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0b1d3a",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "pe.com.techquk.sggp"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "SGGP necesita la cámara para registrar evidencias fotográficas de la atención.",
+          "photosPermission": "SGGP necesita acceso a sus fotos para adjuntar evidencias."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "SGGP registra la ubicación donde se realizó la atención técnica."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "SGGP usa la cámara para leer el código QR del sticker de los equipos y registrar evidencias.",
+          "recordAudioAndroid": false
+        }
+      ]
+    ],
+    "scheme": "sggptecnico",
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
