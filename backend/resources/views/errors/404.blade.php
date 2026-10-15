@@ -1,0 +1,1 @@
+@include('errors._pagina', ['codigo' => 404, 'titulo' => 'Página no encontrada', 'mensaje' => 'La dirección que busca no existe o el registro fue eliminado.', 'icono' => 'search', 'tono' => 'bg-slate-200 text-slate-600'])

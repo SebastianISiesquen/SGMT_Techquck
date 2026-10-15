@@ -1,0 +1,1 @@
+@include('errors._pagina', ['codigo' => 500, 'titulo' => 'Ocurrió un error', 'mensaje' => 'No se pudo completar la operación. Intente nuevamente; si el problema continúa, avise al Administrador.', 'icono' => 'alert', 'tono' => 'bg-red-50 text-red-600'])

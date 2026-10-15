@@ -1,0 +1,1 @@
+@include('errors._pagina', ['codigo' => 403, 'titulo' => 'Acceso no autorizado', 'mensaje' => 'Su usuario no tiene permiso para ingresar a este módulo. Si lo necesita, solicítelo al Administrador del sistema.', 'icono' => 'key', 'tono' => 'bg-red-50 text-red-600'])

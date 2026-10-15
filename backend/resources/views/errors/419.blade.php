@@ -1,0 +1,1 @@
+@include('errors._pagina', ['codigo' => 419, 'titulo' => 'La sesión expiró', 'mensaje' => 'Por seguridad, el formulario caducó. Vuelva a la página anterior, recárguela e intente nuevamente.', 'icono' => 'clock', 'tono' => 'bg-amber-50 text-amber-600'])
