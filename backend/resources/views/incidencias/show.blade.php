@@ -38,8 +38,8 @@
                         <p class="mt-1 text-sm text-violet-800">Revise la atención y las evidencias.
                             @if ($requiereActa)
                                 {!! $incidencia->tieneActaConformidad()
-                                    ? '<span class="font-medium text-emerald-700">✓ Conformidad registrada (acta u hoja de servicio firmada).</span>'
-                                    : '<span class="font-medium text-red-700">Falta el Acta de conformidad o una Hoja de servicio firmada para poder cerrar.</span>' !!}
+                                    ? '<span class="font-medium text-emerald-700">✓ Acta de conformidad firmada recibida.</span>'
+                                    : '<span class="font-medium text-red-700">Falta subir el acta de conformidad firmada por el cliente (en la hoja de servicio) para poder cerrar.</span>' !!}
                             @endif
                         </p>
                         <div class="mt-4 flex flex-wrap gap-2" x-show="!reabrir">
@@ -151,6 +151,32 @@
                     @endcan
                 </div>
             </div>
+
+            @if ($incidencia->estaAbierta() && ($incidencia->proxima_visita || $incidencia->hojasServicio->isNotEmpty()))
+                <div class="card">
+                    <div class="card-header"><h3 class="card-title flex items-center gap-2"><x-icon name="calendar" class="size-4 text-slate-400" /> Próxima visita</h3></div>
+                    <div class="card-body space-y-3">
+                        @if ($incidencia->proxima_visita)
+                            <p class="text-lg font-semibold {{ $incidencia->proxima_visita->isPast() && ! $incidencia->proxima_visita->isToday() ? 'text-red-600' : 'text-slate-900' }}">{{ $incidencia->proxima_visita->format('d/m/Y') }}
+                                <span class="text-xs font-normal text-slate-500">({{ $incidencia->proxima_visita->isToday() ? 'hoy' : $incidencia->proxima_visita->diffForHumans() }})</span></p>
+                            @if ($incidencia->motivo_reprogramacion)<p class="text-sm text-slate-600">Pendiente: {{ $incidencia->motivo_reprogramacion }}</p>@endif
+                        @else
+                            <p class="text-sm text-slate-500">Sin visita programada.</p>
+                        @endif
+                        @can('incidencias.asignar')
+                            <details>
+                                <summary class="cursor-pointer text-sm font-medium text-brand-600">{{ $incidencia->proxima_visita ? 'Reprogramar' : 'Programar visita' }}</summary>
+                                <form method="POST" action="{{ route('incidencias.reprogramar', $incidencia) }}" class="mt-3 space-y-3">
+                                    @csrf
+                                    <x-input name="proxima_visita" type="date" label="Fecha" :value="$incidencia->proxima_visita" :min="today()->toDateString()" required />
+                                    <x-input name="motivo_reprogramacion" label="Motivo / pendiente" :value="$incidencia->motivo_reprogramacion" placeholder="Ej. El cliente pidió el lunes" />
+                                    <button class="btn btn-primary btn-sm w-full">Guardar y avisar al técnico</button>
+                                </form>
+                            </details>
+                        @endcan
+                    </div>
+                </div>
+            @endif
 
             @include('incidencias._historial')
 

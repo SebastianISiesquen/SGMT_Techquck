@@ -94,22 +94,72 @@
                 @endcan
 
                 @if ($proyecto->equipos->isNotEmpty())
+                    @php
+                        $editable = auth()->user()->can('proyectos.gestionar');
+                        $subeFei = auth()->user()->can('equipos.gestionar');
+                    @endphp
+                    <div x-data="{ cambios: {{ $errors->has('editar.*') ? 'true' : 'false' }} }">
+                    @if ($editable)
+                        {{-- Los campos de la tabla apuntan a este formulario (atributo form=), así cada fila puede tener su propio formulario de foto --}}
+                        <form id="form-editar-equipos" method="POST" action="{{ route('proyectos.equipos.update', $proyecto) }}">@csrf @method('PUT')</form>
+                        @foreach ($errors->get('editar.*') as $mensajes)
+                            @foreach ($mensajes as $m)<p class="error px-4 pt-2">{{ $m }}</p>@endforeach
+                        @endforeach
+                    @endif
                     <div class="max-h-[28rem] overflow-auto">
                         <table class="table">
-                            <thead class="sticky top-0"><tr><th>Equipo</th><th>Serie</th><th>Ubicación</th><th>Estado</th></tr></thead>
+                            <thead class="sticky top-0 z-10"><tr><th>Equipo</th><th>Serie</th><th>Ubicación</th><th>Estado</th><th title="Foto del equipo instalado">FEI</th></tr></thead>
                             <tbody class="divide-y divide-slate-100">
                             @foreach ($proyecto->equipos as $e)
                                 <tr>
                                     <td><a href="{{ route('equipos.show', $e) }}" class="font-medium text-slate-800 hover:text-brand-600">{{ $e->categoria }}</a>
                                         @if ($e->incidencias_count)<x-badge color="amber" :dot="false" class="ml-1">{{ $e->incidencias_count }} falla(s)</x-badge>@endif
                                         <p class="text-xs text-slate-500"><span class="font-mono text-brand-600">{{ $e->codigo }}</span>{{ trim($e->marca.' '.$e->modelo) ? ' · '.trim($e->marca.' '.$e->modelo) : '' }}</p></td>
-                                    <td class="whitespace-nowrap font-mono text-xs">{{ $e->serie ?? '—' }}</td>
-                                    <td class="text-xs">{{ collect([$e->area, $e->ubicacion])->filter()->implode(' · ') ?: '—' }}</td>
+                                    @if ($editable)
+                                        <td><input form="form-editar-equipos" name="editar[{{ $e->id }}][serie]" value="{{ old("editar.{$e->id}.serie", $e->serie) }}"
+                                                   placeholder="N° serie" maxlength="80" @input="cambios = true"
+                                                   class="input min-w-32 py-1 font-mono text-xs @error("editar.{$e->id}.serie") border-red-400 @enderror"></td>
+                                        <td><input form="form-editar-equipos" name="editar[{{ $e->id }}][ubicacion]" value="{{ old("editar.{$e->id}.ubicacion", $e->ubicacion) }}"
+                                                   placeholder="Ubicación" maxlength="255" @input="cambios = true" class="input min-w-40 py-1 text-xs">
+                                            @if ($e->area)<p class="mt-0.5 text-[11px] text-slate-400">{{ $e->area }}</p>@endif</td>
+                                    @else
+                                        <td class="whitespace-nowrap font-mono text-xs">{{ $e->serie ?? '—' }}</td>
+                                        <td class="text-xs">{{ collect([$e->area, $e->ubicacion])->filter()->implode(' · ') ?: '—' }}</td>
+                                    @endif
                                     <td><x-badge :color="$e->estadoColor()">{{ $e->estadoLabel() }}</x-badge></td>
+                                    <td>
+                                        <div class="flex items-center gap-1.5">
+                                            @if ($e->fotoInstalacion)
+                                                <a href="{{ route('archivos.ver', $e->fotoInstalacion) }}" target="_blank" title="Ver foto del equipo instalado">
+                                                    <img src="{{ route('archivos.ver', $e->fotoInstalacion) }}" alt="FEI {{ $e->codigo }}" loading="lazy" class="size-10 rounded-md border border-slate-200 object-cover">
+                                                </a>
+                                            @endif
+                                            @if ($subeFei)
+                                                <form method="POST" action="{{ route('archivos.store', ['tipo' => 'equipo', 'id' => $e->id]) }}" enctype="multipart/form-data">
+                                                    @csrf
+                                                    <input type="hidden" name="categoria" value="foto_instalacion">
+                                                    <input type="hidden" name="descripcion" value="FEI — foto del equipo instalado">
+                                                    <label class="btn btn-ghost btn-sm cursor-pointer px-2" title="{{ $e->fotoInstalacion ? 'Cambiar' : 'Subir' }} foto del equipo instalado">
+                                                        <x-icon name="camera" class="size-4" />@unless ($e->fotoInstalacion)<span class="text-xs">Subir</span>@endunless
+                                                        <input type="file" name="archivos[]" accept="image/*" class="hidden" onchange="this.form.submit()">
+                                                    </label>
+                                                </form>
+                                            @elseif (! $e->fotoInstalacion)
+                                                <span class="text-xs text-slate-400">—</span>
+                                            @endif
+                                        </div>
+                                    </td>
                                 </tr>
                             @endforeach
                             </tbody>
                         </table>
+                    </div>
+                    @if ($editable)
+                        <div class="flex items-center justify-end gap-3 border-t border-slate-100 bg-slate-50/60 px-4 py-2">
+                            <span class="text-xs text-amber-700" x-show="cambios" x-cloak>Hay cambios sin guardar</span>
+                            <button form="form-editar-equipos" class="btn btn-primary btn-sm" :disabled="!cambios"><x-icon name="check" class="size-4" /> Guardar serie y ubicación</button>
+                        </div>
+                    @endif
                     </div>
                 @else
                     <x-empty icon="monitor" text="Aún no se registraron los equipos de este proyecto. Regístrelos para poder reportar fallas y llevar su historial." />
@@ -158,11 +208,15 @@
                 <div class="card-header"><h3 class="card-title flex items-center gap-2"><x-icon name="file" class="size-4" /> Informe al cliente</h3>
                     @if ($proyecto->informe_mensual)<x-badge color="green" :dot="false">Envío mensual activo</x-badge>@endif</div>
                 <div class="card-body space-y-3 text-sm">
-                    <p class="text-slate-600">Mantenimientos, incidencias atendidas, estado de los equipos y vigencia de las garantías del periodo.</p>
-                    <div>
-                        <label class="label" for="f_mes">Mes</label>
-                        <input id="f_mes" type="month" x-model="mes" max="{{ now()->format('Y-m') }}" class="input">
-                    </div>
+                    @if ($proyecto->esServicio())
+                        <p class="text-slate-600">Mantenimientos, incidencias atendidas, estado de los equipos y vigencia de las garantías del periodo.</p>
+                        <div>
+                            <label class="label" for="f_mes">Mes</label>
+                            <input id="f_mes" type="month" x-model="mes" max="{{ now()->format('Y-m') }}" class="input">
+                        </div>
+                    @else
+                        <p class="text-slate-600">Todo el proyecto, desde el inicio de ejecución ({{ $proyecto->fecha_inicio?->format('d/m/Y') ?? 'sin registrar' }}) y la entrega / conformidad ({{ $proyecto->fecha_entrega->format('d/m/Y') }}): equipos instalados con su FEI, servicios, incidencias y garantías.</p>
+                    @endif
                     <a :href="'{{ route('proyectos.informe', $proyecto) }}?mes=' + mes" target="_blank" class="btn btn-secondary w-full"><x-icon name="pdf" class="size-4" /> Ver informe (PDF)</a>
                     @can('proyectos.gestionar')
                         <form method="POST" action="{{ route('proyectos.informe.enviar', $proyecto) }}" data-confirmar="¿Enviar el informe por correo al cliente?" data-confirmar-tipo="info" data-confirmar-boton="Enviar">

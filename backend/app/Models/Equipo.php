@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Database\Eloquent\Relations\MorphOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
@@ -51,6 +52,11 @@ class Equipo extends Model
 
     protected static function booted(): void
     {
+        // Enlace público del QR: aleatorio, para que no se puedan adivinar los demás equipos
+        static::creating(function (Equipo $equipo) {
+            $equipo->token_publico ??= \Illuminate\Support\Str::lower(\Illuminate\Support\Str::random(20));
+        });
+
         static::created(function (Equipo $equipo) {
             if (! $equipo->codigo) {
                 $equipo->codigo = sprintf('EQ-%06d', $equipo->id);
@@ -89,6 +95,13 @@ class Equipo extends Model
     public function archivos(): MorphMany
     {
         return $this->morphMany(Archivo::class, 'archivable')->latest();
+    }
+
+    /** FEI: la foto más reciente del equipo ya instalado en su lugar. */
+    public function fotoInstalacion(): MorphOne
+    {
+        return $this->morphOne(Archivo::class, 'archivable')
+            ->ofMany(['id' => 'max'], fn ($q) => $q->where('categoria', 'foto_instalacion'));
     }
 
     public function cotizaciones(): HasMany
@@ -143,8 +156,21 @@ class Equipo extends Model
     }
 
     /** Texto que codifica el QR del sticker; la app lo reconoce al escanearlo. */
+    /**
+     * Lo que codifica el QR del sticker: la ficha pública del equipo, que cualquiera puede abrir
+     * con la cámara del celular. Usa la dirección pública configurada (no «localhost»).
+     */
     public function contenidoQr(): string
     {
-        return route('equipos.qr', $this->codigo);
+        if (! $this->token_publico) {
+            $this->forceFill(['token_publico' => \Illuminate\Support\Str::lower(\Illuminate\Support\Str::random(20))])->saveQuietly();
+        }
+
+        return self::urlPublica()."/e/{$this->token_publico}";
+    }
+
+    public static function urlPublica(): string
+    {
+        return rtrim(\App\Support\Ajustes::get('url_publica') ?: config('app.url'), '/');
     }
 }

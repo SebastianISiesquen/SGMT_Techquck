@@ -65,7 +65,8 @@ export default function DetalleIncidencia() {
   const puedeAdjuntar = ['asignada', 'en_proceso', 'resuelta'].includes(inc.estado);
   const evidencias = [...(inc.archivos ?? []), ...(inc.atenciones ?? []).flatMap((a) => a.archivos)];
   const tieneActa = evidencias.some((a) => a.categoria === 'acta_conformidad');
-  const tieneHojaFirmada = (inc.hojas ?? []).some((h) => h.estado === 'firmada');
+  const tieneHojaFirmada = (inc.hojas ?? []).some((h) => h.estado === 'conforme');
+  const hojasSinActa = (inc.hojas ?? []).filter((h) => h.estado === 'registrada');
 
   return (
     <>
@@ -81,6 +82,24 @@ export default function DetalleIncidencia() {
         </View>
         <Text style={s.titulo}>{inc.titulo}</Text>
         <Text style={s.descripcion}>{inc.descripcion}</Text>
+
+        {inc.proxima_visita && ['asignada', 'en_proceso'].includes(inc.estado) ? (
+          <View style={s.proxima}>
+            <Text style={{ fontWeight: '800', color: '#1e3a8a' }}>🗓️ Próxima visita: {fecha(inc.proxima_visita, false)}</Text>
+            {inc.motivo_reprogramacion ? <Text style={{ color: '#1e3a8a', marginTop: 2 }}>Pendiente: {inc.motivo_reprogramacion}</Text> : null}
+          </View>
+        ) : null}
+
+        {hojasSinActa.length ? (
+          <View style={s.sinActa}>
+            <Text style={{ fontWeight: '700', color: '#92400e', marginBottom: 6 }}>Falta subir el acta firmada:</Text>
+            {hojasSinActa.map((h) => (
+              <Pressable key={h.id} onPress={() => router.push(`/hojas/${h.id}`)} style={{ paddingVertical: 4 }}>
+                <Text style={{ color: color.brand, fontWeight: '700' }}>📄 {h.numero}  ›</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
 
         {/* Acciones del técnico */}
         <View style={{ gap: 10, marginBottom: 16 }}>
@@ -99,11 +118,11 @@ export default function DetalleIncidencia() {
             </View>
           ) : null}
           {inc.estado === 'resuelta' && !tieneHojaFirmada ? (
-            <Boton variante="secondary" texto="📋  Hoja de servicio para la firma"
+            <Boton variante="secondary" texto="📋  Hoja de servicio para el acta"
                    onPress={() => router.push({ pathname: '/hojas/nueva', params: { incidencia_id: String(inc.id) } })} />
           ) : null}
           {inc.estado === 'resuelta' && !tieneActa && !tieneHojaFirmada ? (
-            <Text style={s.aviso}>Para cerrar, el supervisor necesita el Acta de conformidad o una Hoja de servicio firmada.</Text>
+            <Text style={s.aviso}>Para cerrar, el supervisor necesita el acta de conformidad firmada por el cliente.</Text>
           ) : null}
         </View>
 
@@ -180,7 +199,7 @@ export default function DetalleIncidencia() {
             {inc.hojas.map((h) => (
               <Pressable key={h.id} onPress={() => router.push(`/hojas/${h.id}`)} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8 }}>
                 <Text style={{ fontWeight: '600', color: color.text }}>{h.numero}  ›</Text>
-                <Badge texto={h.estado_label} tono={colorEstado[h.estado]} />
+                <Badge texto={h.estado_label} tono={h.estado === 'registrada' ? 'amber' : colorEstado[h.estado]} />
               </Pressable>
             ))}
           </Card>
@@ -223,6 +242,8 @@ const s = StyleSheet.create({
   titulo: { fontSize: 20, fontWeight: '800', color: color.text, marginBottom: 6 },
   descripcion: { fontSize: 15, color: '#334155', lineHeight: 21, marginBottom: 16 },
   antecedentes: { backgroundColor: '#fffbeb', borderRadius: 10, padding: 10, marginTop: 10 },
+  proxima: { backgroundColor: '#eff6ff', borderWidth: 1, borderColor: '#bfdbfe', borderRadius: 12, padding: 12, marginBottom: 12 },
+  sinActa: { backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fcd34d', borderRadius: 12, padding: 12, marginBottom: 12 },
   aviso: { backgroundColor: '#fffbeb', color: '#92400e', padding: 10, borderRadius: 8, fontSize: 13 },
   llamar: { backgroundColor: color.brandSoft, padding: 10, borderRadius: 8, marginBottom: 10, alignItems: 'center' },
   atencion: { borderTopWidth: 1, borderTopColor: color.border, paddingTop: 12, marginTop: 4 },

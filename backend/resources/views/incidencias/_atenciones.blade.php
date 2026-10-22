@@ -1,7 +1,12 @@
-{{-- Atenciones técnicas registradas (compartido por la vista del supervisor y la del técnico) --}}
+{{--
+    Atenciones registradas sin hoja de servicio (registros anteriores). Las que vienen de una hoja
+    se muestran en «Visitas realizadas», para no repetir la misma información.
+--}}
+@php($sueltas = $incidencia->atenciones->whereNotIn('id', $incidencia->hojasServicio->pluck('atencion_id')->filter()->all()))
+@if ($sueltas->isNotEmpty() || $incidencia->hojasServicio->isEmpty())
 <div class="card">
-    <div class="card-header"><h3 class="card-title flex items-center gap-2"><x-icon name="wrench" class="size-4 text-slate-400" /> Atenciones técnicas ({{ $incidencia->atenciones->count() }})</h3></div>
-    @forelse ($incidencia->atenciones as $a)
+    <div class="card-header"><h3 class="card-title flex items-center gap-2"><x-icon name="wrench" class="size-4 text-slate-400" /> {{ $incidencia->hojasServicio->isEmpty() ? 'Visitas realizadas' : 'Otras atenciones' }} ({{ $sueltas->count() }})</h3></div>
+    @forelse ($sueltas as $a)
         <div class="border-b border-slate-100 p-5 last:border-0">
             <div class="flex flex-wrap items-center justify-between gap-2">
                 <div class="flex items-center gap-2">
@@ -42,6 +47,7 @@
             @endif
         </div>
     @empty
-        <x-empty icon="wrench" text="Aún no se registran atenciones técnicas." />
+        <x-empty icon="clipboard" text="Aún no se registran visitas del técnico." />
     @endforelse
 </div>
+@endif

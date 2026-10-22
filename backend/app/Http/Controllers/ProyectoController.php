@@ -87,7 +87,7 @@ class ProyectoController extends Controller
     {
         $proyecto->loadCount(['equipos', 'equipos as equipos_con_falla_count' => fn ($q) => $q->whereIn('estado', ['con_falla', 'en_reparacion', 'inoperativo'])]);
         $proyecto->load(['entidad', 'clienteFinal', 'responsable', 'garantias', 'archivos.autor',
-            'equipos' => fn ($q) => $q->with('garantia')->withCount('incidencias')->orderBy('categoria')->orderBy('codigo'),
+            'equipos' => fn ($q) => $q->with(['garantia', 'fotoInstalacion'])->withCount('incidencias')->orderBy('categoria')->orderBy('codigo'),
             'planesMantenimiento' => fn ($q) => $q->with(['mantenimientos', 'tecnico'])->where('activo', true),
             'incidencias' => fn ($q) => $q->with('tecnico')->latest('fecha_reporte')->limit(10)]);
 
@@ -160,6 +160,53 @@ class ProyectoController extends Controller
         $creados = DB::transaction(fn () => $this->guardarEquipos($request, $proyecto));
 
         return back()->with('ok', $creados ? "Se registraron {$creados} equipo(s) en el proyecto." : 'No se ingresó ningún equipo.');
+    }
+
+    /** Serie y ubicación editadas directamente en la tabla de equipos instalados del proyecto. */
+    public function actualizarEquipos(Request $request, Proyecto $proyecto)
+    {
+        $equipos = $proyecto->equipos()->whereIn('id', array_keys($request->input('editar', [])))->get()->keyBy('id');
+        $entidadId = $proyecto->lugarDeServicio()->id;
+
+        $datos = $request->validate([
+            'editar' => ['array'],
+            'editar.*.serie' => ['nullable', 'string', 'max:80', 'distinct:ignore_case',
+                function (string $campo, $serie, \Closure $falla) use ($entidadId) {
+                    $id = (int) explode('.', $campo)[1];
+                    if (Equipo::where('entidad_id', $entidadId)->where('serie', $serie)->whereKeyNot($id)->exists()) {
+                        $falla("La serie {$serie} ya está registrada en este cliente.");
+                    }
+                }],
+            'editar.*.ubicacion' => ['nullable', 'string', 'max:255'],
+        ], ['editar.*.serie.distinct' => 'La serie :input está repetida en la lista.']);
+
+        $cambiados = 0;
+        DB::transaction(function () use ($datos, $equipos, &$cambiados) {
+            foreach ($datos['editar'] ?? [] as $id => $fila) {
+                if (! $e = $equipos->get($id)) {
+                    continue; // equipo de otro proyecto
+                }
+                $antes = $e->ubicacion;
+                $e->fill(['serie' => $fila['serie'] ?? null, 'ubicacion' => $fila['ubicacion'] ?? null]);
+                if (! $e->isDirty()) {
+                    continue;
+                }
+                $e->save();
+                $cambiados++;
+
+                if ($antes !== $e->ubicacion) {
+                    EquipoService::registrarEvento($e, 'traslado', 'Cambio de ubicación', [
+                        'detalle' => ($antes ?: 'Sin ubicación').' → '.($e->ubicacion ?: 'Sin ubicación'),
+                    ]);
+                }
+            }
+        });
+
+        if ($cambiados) {
+            Auditor::log('editar', 'equipos', "Actualizó serie/ubicación de {$cambiados} equipo(s) del proyecto {$proyecto->codigo}", $proyecto);
+        }
+
+        return back()->with('ok', $cambiados ? "Se actualizaron {$cambiados} equipo(s)." : 'No hubo cambios que guardar.');
     }
 
     /** Valida y registra las filas «equipos[i][…]» del formulario. */

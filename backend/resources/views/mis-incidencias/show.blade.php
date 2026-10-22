@@ -53,16 +53,37 @@
 
             @include('incidencias._equipo')
 
+            @if ($incidencia->proxima_visita && $incidencia->estaAbierta())
+                <div class="flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+                    <x-icon name="calendar" class="mt-0.5 size-5 shrink-0" />
+                    <div><p class="font-semibold">Próxima visita: {{ $incidencia->proxima_visita->format('d/m/Y') }}{{ $incidencia->proxima_visita->isToday() ? ' (hoy)' : '' }}</p>
+                        @if ($incidencia->motivo_reprogramacion)<p>Pendiente: {{ $incidencia->motivo_reprogramacion }}</p>@endif</div>
+                </div>
+            @endif
+
             @if ($puedeAtender)
-                {{-- Cada visita se registra en una sola hoja de servicio: diagnóstico, trabajo, equipos, materiales, fotos y firma --}}
+                {{-- Cada visita (cada día de trabajo) se registra en su propia hoja de servicio --}}
                 <div class="card border-brand-200 bg-brand-50/40 p-5">
                     <div class="flex flex-wrap items-center justify-between gap-4">
                         <div>
-                            <p class="flex items-center gap-2 font-semibold text-slate-800"><x-icon name="clipboard" class="size-5 text-brand-600" /> Registrar la visita</p>
-                            <p class="mt-1 text-sm text-slate-600">Llene la hoja de servicio con el diagnóstico, el trabajo realizado, los equipos, los materiales usados y las fotos.
-                                El cliente firma la conformidad en la misma hoja.</p>
+                            <p class="flex items-center gap-2 font-semibold text-slate-800"><x-icon name="clipboard" class="size-5 text-brand-600" />
+                                {{ $incidencia->hojasServicio->isNotEmpty() ? 'Registrar la visita de hoy' : 'Registrar la visita' }}</p>
+                            <p class="mt-1 text-sm text-slate-600">Llene la hoja de servicio con el diagnóstico, el trabajo realizado, los equipos, los materiales y las fotos.
+                                Si no termina hoy, indique qué falta y la fecha en que vuelve: cada visita queda guardada.</p>
                         </div>
                         <a href="{{ route('hojas.create', ['incidencia_id' => $incidencia->id]) }}" class="btn btn-primary"><x-icon name="clipboard" class="size-4" /> Llenar hoja de servicio</a>
+                    </div>
+                </div>
+            @endif
+
+            @php($sinActa = $incidencia->hojasServicio->filter->esEditable())
+            @if ($sinActa->isNotEmpty())
+                <div class="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+                    <p class="font-semibold">Falta subir el acta firmada de {{ $sinActa->count() === 1 ? 'la hoja' : 'las hojas' }}:</p>
+                    <div class="mt-2 flex flex-wrap gap-2">
+                        @foreach ($sinActa as $h)
+                            <a href="{{ route('hojas.show', $h) }}" class="btn btn-secondary btn-sm"><x-icon name="upload" class="size-4" /> {{ $h->numero }} · {{ $h->fecha->format('d/m') }}</a>
+                        @endforeach
                     </div>
                 </div>
             @endif

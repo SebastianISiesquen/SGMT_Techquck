@@ -53,6 +53,8 @@ export interface Incidencia {
   sla_vencido: boolean;
   cobertura: string;
   cobertura_label: string;
+  proxima_visita: string | null;
+  motivo_reprogramacion: string | null;
   puede_atender: boolean;
   proyecto: {
     id: number;
@@ -126,8 +128,13 @@ export interface HojaServicio {
   receptor_nombre: string | null;
   receptor_dni: string | null;
   receptor_cargo: string | null;
-  fecha_firma: string | null;
-  puede_firmar: boolean;
+  tiene_acta: boolean;
+  fecha_acta: string | null;
+  puede_subir_acta: boolean;
+  pendientes: string | null;
+  proxima_visita: string | null;
+  verificaciones: { item: string; resultado: string }[];
+  mediciones: { parametro: string; valor: string; unidad: string | null }[];
   proyecto: { id: number; nombre: string; entidad: string };
   mantenimiento?: string | null;
   incidencia?: { id: number; codigo: string } | null;

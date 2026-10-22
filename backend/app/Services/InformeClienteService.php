@@ -7,6 +7,7 @@ use App\Models\Incidencia;
 use App\Models\Mantenimiento;
 use App\Models\Proyecto;
 use App\Notifications\InformeCliente;
+use App\Services\Pdf\Imagenes;
 use App\Support\Ajustes;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Carbon;
@@ -37,7 +38,11 @@ class InformeClienteService
                 ->orWhere(fn ($q) => $q->abiertas()->where('fecha_reporte', '<', $rango[0])))
             ->orderBy('fecha_reporte')->get();
 
-        $equipos = $proyecto->equipos()->get();
+        $equipos = $proyecto->equipos()->with('fotoInstalacion')->orderBy('categoria')->orderBy('codigo')->get();
+        // FEI en miniatura para la tabla de equipos instalados
+        $feis = $equipos->filter->fotoInstalacion
+            ->mapWithKeys(fn ($e) => [$e->id => Imagenes::paraPdf([$e->fotoInstalacion], 64, 48)->first()])
+            ->filter();
         $materiales = $hojas->flatMap->materiales->groupBy(fn ($m) => $m->descripcion.'|'.$m->unidad)
             ->map(fn ($g) => ['descripcion' => $g->first()->descripcion, 'unidad' => $g->first()->unidad, 'cantidad' => $g->sum('cantidad')])
             ->values();
@@ -51,6 +56,7 @@ class InformeClienteService
             'visitas' => $visitas,
             'incidencias' => $incidencias,
             'equipos' => $equipos,
+            'feis' => $feis,
             'equiposPorEstado' => $equipos->countBy('estado'),
             'equiposAtencion' => $equipos->whereIn('estado', ['con_falla', 'en_reparacion', 'inoperativo', 'observado'])->values(),
             'materiales' => $materiales,

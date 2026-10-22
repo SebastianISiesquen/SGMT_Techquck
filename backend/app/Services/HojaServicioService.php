@@ -4,20 +4,29 @@ namespace App\Services;
 
 use App\Enums\EstadoHoja;
 use App\Enums\EstadoIncidencia;
-use App\Models\HojaServicio;
+use App\Enums\ResultadoAtencion;
+use App\Models\AlmacenArticulo;
 use App\Models\Equipo;
 use App\Models\EquipoEvento;
+use App\Models\HojaServicio;
 use App\Models\Incidencia;
 use App\Models\Mantenimiento;
 use App\Models\Proyecto;
 use App\Models\User;
-use App\Notifications\HojaServicioFirmada;
+use App\Notifications\ActaConformidadRecibida;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Validation\ValidationException;
 
-/** Registro, firma y anulación de hojas de servicio en campo. */
+/**
+ * Hoja de servicio = registro de cada visita del técnico.
+ * - En una incidencia crea la atención técnica y avanza su estado.
+ * - Si el trabajo no se terminó, deja lo pendiente y la fecha de la próxima visita;
+ *   la siguiente visita es otra hoja, así queda guardado lo que se hizo cada día.
+ * - La conformidad del cliente es el acta firmada (foto o PDF) que se sube a la hoja.
+ */
 class HojaServicioService
 {
     public function __construct(private IncidenciaService $incidencias) {}
@@ -26,33 +35,31 @@ class HojaServicioService
      * @param  array<int, array>  $equipos
      * @param  array<int, array>  $materiales
      * @param  array<int, UploadedFile>  $fotos
-     * @param  array|null  $firma  receptor_nombre, receptor_dni, receptor_cargo, firma_receptor, firma_tecnico, conforme
+     * @param  array<int, UploadedFile>  $actas  acta de conformidad firmada (si el cliente ya la firmó)
+     * @param  array<int, string|null>  $descripciones  leyenda de cada foto (aparece en el PDF)
      */
-    public function crear(array $datos, array $equipos = [], array $materiales = [], array $fotos = [], ?array $firma = null, string $origen = 'web'): HojaServicio
+    public function crear(array $datos, array $equipos = [], array $materiales = [], array $fotos = [], array $actas = [], string $origen = 'web', array $descripciones = []): HojaServicio
     {
-        $datos = $this->completarDesdeIncidencia($datos);
+        $datos = $this->normalizar($this->completarDesdeIncidencia($datos));
 
-        // La firma se valida antes de crear nada: si es inválida no queda una hoja a medias
-        // (evita duplicados cuando la app reintenta el envío).
-        $columnasFirma = $firma && ! empty($firma['firma_receptor']) ? $this->prepararFirma($firma) : null;
-
-        return DB::transaction(function () use ($datos, $equipos, $materiales, $fotos, $columnasFirma, $origen) {
+        return DB::transaction(function () use ($datos, $equipos, $materiales, $fotos, $actas, $origen, $descripciones) {
             $hoja = HojaServicio::create([
                 ...$datos,
                 'tecnico_id' => auth()->id(),
-                'estado' => EstadoHoja::PendienteFirma,
+                'estado' => EstadoHoja::Registrada,
                 'origen' => $origen,
             ]);
 
             $this->guardarDetalle($hoja, $equipos, $materiales);
 
-            foreach ($fotos as $foto) {
-                ArchivoService::guardar($foto, $hoja, ArchivoService::categoriaPara($foto, 'foto'));
+            foreach ($fotos as $i => $foto) {
+                ArchivoService::guardar($foto, $hoja, ArchivoService::categoriaPara($foto, 'foto'), $descripciones[$i] ?? null);
             }
 
             if ($hoja->incidencia) {
-                $this->incidencias->historial($hoja->incidencia, 'hoja_servicio', null, null, "Hoja de servicio {$hoja->numero} registrada");
+                $this->incidencias->historial($hoja->incidencia, 'hoja_servicio', null, null, "Visita del {$hoja->fecha->format('d/m/Y')}: hoja {$hoja->numero}");
                 $this->registrarAtencion($hoja);
+                $this->programarSiguienteVisita($hoja);
             }
 
             // Visita de un plan de mantenimiento: queda como realizada con esta hoja.
@@ -64,9 +71,11 @@ class HojaServicioService
 
             Auditor::log('crear', 'hojas_servicio', "Registró la hoja de servicio {$hoja->numero}", $hoja);
 
-            if ($columnasFirma) {
-                $hoja->update($columnasFirma);
-                $this->registrarFirma($hoja);
+            foreach ($actas as $acta) {
+                ArchivoService::guardar($acta, $hoja, 'acta_conformidad', 'Acta de conformidad firmada');
+            }
+            if ($actas) {
+                $this->registrarActa($hoja);
             }
 
             return $hoja->fresh();
@@ -76,7 +85,7 @@ class HojaServicioService
     public function actualizar(HojaServicio $hoja, array $datos, array $equipos, array $materiales): HojaServicio
     {
         $this->exigirEditable($hoja);
-        $datos = $this->completarDesdeIncidencia($datos);
+        $datos = $this->normalizar($this->completarDesdeIncidencia($datos));
 
         DB::transaction(function () use ($hoja, $datos, $equipos, $materiales) {
             $hoja->update($datos);
@@ -84,8 +93,11 @@ class HojaServicioService
             $hoja->materiales()->delete();
             $this->guardarDetalle($hoja, $equipos, $materiales);
 
-            // La atención de la incidencia refleja lo corregido en la hoja
+            // La atención de la incidencia y la próxima visita reflejan lo corregido en la hoja
             $hoja->atencion?->update($this->datosAtencion($hoja->fresh()));
+            if ($hoja->incidencia && $hoja->incidencia->estaAbierta()) {
+                $this->programarSiguienteVisita($hoja->fresh());
+            }
         });
 
         Auditor::log('editar', 'hojas_servicio', "Editó la hoja de servicio {$hoja->numero}", $hoja);
@@ -93,51 +105,26 @@ class HojaServicioService
         return $hoja;
     }
 
-    /** Firma del responsable de la entidad (conformidad) y del técnico. La hoja queda bloqueada. */
-    public function firmar(HojaServicio $hoja, array $firma): HojaServicio
+    /**
+     * Se subió el acta firmada por el cliente: la hoja queda conforme y ya no se edita.
+     * Se llama al adjuntar un archivo de categoría «acta de conformidad» a la hoja.
+     */
+    public function registrarActa(HojaServicio $hoja): void
     {
-        $this->exigirEditable($hoja);
-
-        $hoja->update($this->prepararFirma($firma));
-        $this->registrarFirma($hoja);
-
-        return $hoja;
-    }
-
-    /** Valida los datos del firmante y guarda las imágenes de firma; devuelve las columnas a actualizar. */
-    private function prepararFirma(array $firma): array
-    {
-        if (empty($firma['receptor_nombre'])) {
-            throw ValidationException::withMessages(['receptor_nombre' => 'Indique el nombre de quien firma por la entidad.']);
-        }
-        if (empty($firma['firma_receptor'])) {
-            throw ValidationException::withMessages(['firma_receptor' => 'Falta la firma del responsable de la entidad.']);
+        if ($hoja->estado !== EstadoHoja::Registrada) {
+            return;
         }
 
-        return array_filter([
-            'receptor_nombre' => $firma['receptor_nombre'],
-            'receptor_dni' => $firma['receptor_dni'] ?? null,
-            'receptor_cargo' => $firma['receptor_cargo'] ?? null,
-            'conforme' => (bool) ($firma['conforme'] ?? false),
-            'firma_receptor' => FirmaService::guardar($firma['firma_receptor'], 'firma_receptor'),
-            'firma_tecnico' => ! empty($firma['firma_tecnico']) ? FirmaService::guardar($firma['firma_tecnico'], 'firma_tecnico') : null,
-            'estado' => EstadoHoja::Firmada,
-            'fecha_firma' => now(),
-        ], fn ($v) => $v !== null);
-    }
-
-    private function registrarFirma(HojaServicio $hoja): void
-    {
-        $detalle = "Hoja {$hoja->numero} firmada por {$hoja->receptor_nombre}".($hoja->conforme ? ' (con conformidad)' : ' (con observaciones)');
+        $hoja->update(['estado' => EstadoHoja::Conforme, 'conforme' => true, 'fecha_firma' => now()]);
 
         if ($hoja->incidencia) {
-            $this->incidencias->historial($hoja->incidencia, 'hoja_servicio', null, null, $detalle);
+            $this->incidencias->historial($hoja->incidencia, 'hoja_servicio', null, null, "Acta de conformidad de la hoja {$hoja->numero} recibida");
         }
 
-        Auditor::log('firmar', 'hojas_servicio', $detalle, $hoja);
+        Auditor::log('adjuntar', 'hojas_servicio', "Subió el acta de conformidad de la hoja {$hoja->numero}", $hoja);
 
         $supervisores = User::activos()->permission('hojas.ver')->get()->reject(fn ($u) => $u->id === auth()->id());
-        Notification::send($supervisores, new HojaServicioFirmada($hoja));
+        Notification::send($supervisores, new ActaConformidadRecibida($hoja));
     }
 
     public function anular(HojaServicio $hoja, string $motivo): HojaServicio
@@ -162,6 +149,27 @@ class HojaServicioService
         return $hoja;
     }
 
+    /**
+     * Si el trabajo quedó pendiente, la incidencia sigue en proceso con la fecha de la próxima visita;
+     * si se resolvió, se limpia la reprogramación.
+     */
+    private function programarSiguienteVisita(HojaServicio $hoja): void
+    {
+        $inc = $hoja->incidencia->fresh();
+
+        if ($hoja->requiereVisita() && $hoja->proxima_visita) {
+            $cambio = $inc->proxima_visita?->toDateString() !== $hoja->proxima_visita->toDateString();
+            $inc->update(['proxima_visita' => $hoja->proxima_visita, 'motivo_reprogramacion' => $hoja->pendientes]);
+
+            if ($cambio) {
+                $this->incidencias->historial($inc, 'reprogramacion', null, null,
+                    "Continúa el {$hoja->proxima_visita->format('d/m/Y')}".($hoja->pendientes ? ": {$hoja->pendientes}" : ''));
+            }
+        } elseif ($inc->proxima_visita && $hoja->resultado && ! $hoja->requiereVisita()) {
+            $inc->update(['proxima_visita' => null, 'motivo_reprogramacion' => null]);
+        }
+    }
+
     /** Si viene de una incidencia, el proyecto y la garantía se toman de ella. */
     private function completarDesdeIncidencia(array $datos): array
     {
@@ -173,6 +181,29 @@ class HojaServicioService
 
         if (! empty($datos['garantia_id']) && ! Proyecto::find($datos['proyecto_id'])?->garantias()->whereKey($datos['garantia_id'])->exists()) {
             throw ValidationException::withMessages(['garantia_id' => 'La garantía no pertenece al proyecto.']);
+        }
+
+        return $datos;
+    }
+
+    /** Limpia verificaciones y mediciones vacías; sin trabajo pendiente no hay próxima visita. */
+    private function normalizar(array $datos): array
+    {
+        if (array_key_exists('verificaciones', $datos)) {
+            $datos['verificaciones'] = collect($datos['verificaciones'] ?? [])
+                ->filter(fn ($v) => filled($v['item'] ?? null) && filled($v['resultado'] ?? null))
+                ->map(fn ($v) => ['item' => $v['item'], 'resultado' => $v['resultado']])->values()->all() ?: null;
+        }
+
+        if (array_key_exists('mediciones', $datos)) {
+            $datos['mediciones'] = collect($datos['mediciones'] ?? [])
+                ->filter(fn ($m) => filled($m['parametro'] ?? null) && filled($m['valor'] ?? null))
+                ->map(fn ($m) => ['parametro' => $m['parametro'], 'valor' => $m['valor'], 'unidad' => $m['unidad'] ?? null])->values()->all() ?: null;
+        }
+
+        $resultado = ResultadoAtencion::tryFrom($datos['resultado'] ?? '');
+        if (! $resultado?->requiereVisita()) {
+            $datos['proxima_visita'] = null;
         }
 
         return $datos;
@@ -195,8 +226,8 @@ class HojaServicioService
     }
 
     /**
-     * La hoja es el registro único de la visita: en una incidencia asignada o en proceso,
-     * crea la atención técnica (diagnóstico, trabajo y resultado) y avanza su estado.
+     * En una incidencia asignada o en proceso, la hoja crea la atención técnica
+     * (diagnóstico, trabajo y resultado) y avanza su estado.
      */
     private function registrarAtencion(HojaServicio $hoja): void
     {
@@ -216,15 +247,15 @@ class HojaServicioService
     private function datosAtencion(HojaServicio $hoja): array
     {
         $dia = $hoja->fecha->toDateString();
-        $inicio = \Illuminate\Support\Carbon::parse("$dia {$hoja->hora_llegada}");
-        $fin = $hoja->hora_salida ? \Illuminate\Support\Carbon::parse("$dia {$hoja->hora_salida}") : null;
+        $inicio = Carbon::parse("$dia {$hoja->hora_llegada}");
+        $fin = $hoja->hora_salida ? Carbon::parse("$dia {$hoja->hora_salida}") : null;
 
         return [
             'fecha_inicio' => $inicio->isFuture() ? now() : $inicio,
             'fecha_fin' => $fin && $fin->isFuture() ? now() : $fin,
             'diagnostico' => $hoja->diagnostico ?: $hoja->trabajo_realizado,
             'actividades' => $hoja->trabajo_realizado,
-            'observaciones' => $hoja->observaciones,
+            'observaciones' => collect([$hoja->observaciones, $hoja->pendientes ? "Pendiente: {$hoja->pendientes}" : null])->filter()->implode("\n") ?: null,
             'resultado' => $hoja->resultado,
             'latitud' => $hoja->latitud,
             'longitud' => $hoja->longitud,
@@ -234,7 +265,7 @@ class HojaServicioService
     /** Si el material es del almacén, su nombre y unidad salen del artículo. */
     private function completarMaterial(array $fila): array
     {
-        $articulo = ! empty($fila['articulo_id']) ? \App\Models\AlmacenArticulo::find($fila['articulo_id']) : null;
+        $articulo = ! empty($fila['articulo_id']) ? AlmacenArticulo::find($fila['articulo_id']) : null;
         if (! $articulo) {
             return [...$fila, 'articulo_id' => null];
         }
@@ -269,7 +300,7 @@ class HojaServicioService
     private function exigirEditable(HojaServicio $hoja): void
     {
         if (! $hoja->esEditable()) {
-            throw ValidationException::withMessages(['estado' => 'La hoja de servicio ya fue firmada o anulada y no puede modificarse.']);
+            throw ValidationException::withMessages(['estado' => 'La hoja ya tiene el acta de conformidad o está anulada y no puede modificarse.']);
         }
     }
 }

@@ -6,19 +6,11 @@
     @include('pdf._estilos')
 </head>
 <body>
-<header>
-    <div class="empresa">{{ $empresa['empresa_nombre'] }}</div>
-    <div class="sub">RUC {{ $empresa['empresa_ruc'] }} · {{ $empresa['empresa_direccion'] }}</div>
-    <div class="sub">Sistema de Gestión y Seguimiento de Garantías</div>
-    <div class="titulo">
-        <h1>{{ $titulo }}</h1>
-        <div class="sub">Generado el {{ $generado->format('d/m/Y H:i') }} por {{ $usuario }}</div>
-    </div>
-</header>
-<footer>
-    <span>{{ $empresa['empresa_nombre'] }} · {{ $titulo }} · {{ $filas->count() }} registro(s)</span>
-    <span class="pag" style="float: right;"></span>
-</footer>
+@include('pdf._cabecera', [
+    'titulo' => mb_strtoupper($titulo),
+    'datos' => ['Registros' => $filas->count(), 'Generado' => $generado->format('d/m/Y h:i A'), 'Por' => $usuario],
+    'pie' => $titulo,
+])
 
 <p class="filtros"><strong>Filtros:</strong> {{ $filtros ? implode(' · ', $filtros) : 'Ninguno (todos los registros)' }}</p>
 

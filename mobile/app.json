@@ -45,6 +45,14 @@
           "cameraPermission": "SGGP usa la cámara para leer el código QR del sticker de los equipos y registrar evidencias.",
           "recordAudioAndroid": false
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
       ]
     ],
     "scheme": "sggptecnico",

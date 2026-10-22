@@ -13,7 +13,7 @@ enum ResultadoAtencion: string
     {
         return match ($this) {
             self::Resuelto => 'Resuelto',
-            self::Parcial => 'Atención parcial',
+            self::Parcial => 'No se terminó: continúa otro día',
             self::PendienteRepuesto => 'Pendiente de repuesto',
             self::NoProcede => 'No procede (fuera de garantía)',
         };
@@ -33,6 +33,12 @@ enum ResultadoAtencion: string
     public function finaliza(): bool
     {
         return in_array($this, [self::Resuelto, self::NoProcede]);
+    }
+
+    /** Resultados que obligan a programar una nueva visita. */
+    public function requiereVisita(): bool
+    {
+        return in_array($this, [self::Parcial, self::PendienteRepuesto]);
     }
 
     public static function options(): array

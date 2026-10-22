@@ -5,7 +5,8 @@ namespace App\Notifications;
 use App\Models\HojaServicio;
 use Illuminate\Notifications\Notification;
 
-class HojaServicioFirmada extends Notification
+/** El técnico subió el acta de conformidad firmada por el cliente. */
+class ActaConformidadRecibida extends Notification
 {
     public function __construct(public HojaServicio $hoja) {}
 
@@ -20,8 +21,8 @@ class HojaServicioFirmada extends Notification
 
         return [
             'tipo' => 'hoja',
-            'titulo' => "Hoja de servicio {$h->numero} firmada".($h->conforme ? '' : ' con observaciones'),
-            'mensaje' => "{$h->tipo_servicio->label()} · {$h->proyecto->entidad->nombre} · {$h->tecnico?->name}",
+            'titulo' => "Acta de conformidad recibida · {$h->numero}",
+            'mensaje' => "{$h->tipo_servicio->label()} · {$h->proyecto->lugarDeServicio()->nombre} · {$h->tecnico?->name}",
             'url' => route('hojas.show', $h),
             'incidencia_id' => $h->incidencia_id,
         ];

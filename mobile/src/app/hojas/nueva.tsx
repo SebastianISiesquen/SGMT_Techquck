@@ -1,11 +1,10 @@
 import * as Location from 'expo-location';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
-import { CampoFirma, firmaJson, type Firma } from '@/components/FirmaPad';
+import { Alert, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Boton, Campo, Card, Cargando, Chip } from '@/components/ui';
 import { api } from '@/lib/api';
-import { adjuntar, elegirDeGaleria, tomarFoto, type ArchivoLocal } from '@/lib/archivos';
+import { adjuntar, elegirDeGaleria, elegirDocumento, tomarFoto, type ArchivoLocal } from '@/lib/archivos';
 import { tomarEquipoEscaneado } from '@/lib/seleccion';
 import { color } from '@/lib/theme';
 import type { ArticuloAlmacen, Equipo as EquipoInventario, Incidencia, ProyectoOpcion, PuntoChecklist } from '@/lib/types';
@@ -23,9 +22,12 @@ const ACCIONES = [
 ];
 const ESTADOS = [{ valor: 'operativo', texto: 'Operativo' }, { valor: 'observado', texto: 'Con observ.' }, { valor: 'inoperativo', texto: 'Inoperativo' }];
 const RESULTADOS = [
-  { valor: 'resuelto', texto: 'Resuelto' }, { valor: 'parcial', texto: 'Atención parcial' },
-  { valor: 'pendiente_repuesto', texto: 'Pendiente de repuesto' }, { valor: 'no_procede', texto: 'No procede' },
+  { valor: 'resuelto', texto: '✅ Resuelto' }, { valor: 'parcial', texto: '⏳ No se terminó: vuelvo otro día' },
+  { valor: 'pendiente_repuesto', texto: '📦 Pendiente de repuesto' }, { valor: 'no_procede', texto: '⛔ No procede' },
 ];
+const CONTINUA = ['parcial', 'pendiente_repuesto'];
+interface Verificacion { item: string; resultado: 'ok' | 'no' | 'na' }
+interface Medicion { parametro: string; valor: string; unidad: string }
 const PUNTOS = [
   { valor: 'ok', texto: 'OK', fondo: '#059669' }, { valor: 'observado', texto: 'Obs.', fondo: '#d97706' },
   { valor: 'falla', texto: 'Falla', fondo: '#dc2626' }, { valor: 'na', texto: 'N/A', fondo: '#64748b' },
@@ -41,9 +43,15 @@ interface Material { articulo_id: string; descripcion: string; cantidad: string;
 
 const dos = (n: number) => String(n).padStart(2, '0');
 const horaDe = (d: Date) => `${dos(d.getHours())}:${dos(d.getMinutes())}`;
-const hoy = () => { const d = new Date(); return `${d.getFullYear()}-${dos(d.getMonth() + 1)}-${dos(d.getDate())}`; };
+const fechaIso = (d: Date) => `${d.getFullYear()}-${dos(d.getMonth() + 1)}-${dos(d.getDate())}`;
+const hoy = () => fechaIso(new Date());
+const manana = () => fechaIso(new Date(Date.now() + 86_400_000));
 
-/** Hoja de servicio en campo: datos, equipos, materiales, fotos y firma del responsable (con el dedo). */
+/**
+ * Hoja de servicio de la visita: verificaciones, equipos, trabajo, mediciones, materiales y fotos.
+ * Si no se termina, se indica lo pendiente y la próxima visita. La conformidad es el acta
+ * firmada a mano, que se fotografía y se sube (ahora o después).
+ */
 export default function NuevaHoja() {
   const { incidencia_id, mantenimiento_id, proyecto_id, etiqueta } = useLocalSearchParams<{ incidencia_id?: string; mantenimiento_id?: string; proyecto_id?: string; etiqueta?: string }>();
   const router = useRouter();
@@ -75,9 +83,11 @@ export default function NuevaHoja() {
   const [receptor, setReceptor] = useState('');
   const [dni, setDni] = useState('');
   const [cargo, setCargo] = useState('');
-  const [conforme, setConforme] = useState(true);
-  const [firmaReceptor, setFirmaReceptor] = useState<Firma | null>(null);
-  const [firmaTecnico, setFirmaTecnico] = useState<Firma | null>(null);
+  const [pendientes, setPendientes] = useState('');
+  const [proximaVisita, setProximaVisita] = useState(manana());
+  const [verificaciones, setVerificaciones] = useState<Verificacion[]>([]);
+  const [mediciones, setMediciones] = useState<Medicion[]>([]);
+  const [actas, setActas] = useState<ArchivoLocal[]>([]);
   const [enviando, setEnviando] = useState(false);
 
   useEffect(() => {
@@ -89,6 +99,7 @@ export default function NuevaHoja() {
           api.almacen().catch(() => [] as ArticuloAlmacen[]),
           api.checklists().catch(() => ({} as Record<string, string[]>)),
         ]);
+        api.verificaciones().then((l) => setVerificaciones(l.map((item) => ({ item, resultado: 'ok' as const })))).catch(() => undefined);
         setProyectos(lista);
         setArticulos(arts);
         setChecklists(listas);
@@ -104,8 +115,9 @@ export default function NuevaHoja() {
           const ultima = inc.atenciones?.[0];
           if (ultima) {
             setDiagnostico(ultima.diagnostico);
-            setTrabajo(ultima.actividades);
-            setObservaciones(ultima.observaciones ?? '');
+            // Segunda visita: se parte de lo que quedó pendiente; lo de la visita anterior ya está en su hoja
+            setTrabajo(inc.motivo_reprogramacion ? `Continuación. Pendiente: ${inc.motivo_reprogramacion}\n` : ultima.actividades);
+            setObservaciones(inc.motivo_reprogramacion ? '' : ultima.observaciones ?? '');
           }
         }
       } catch (e) {
@@ -158,7 +170,10 @@ export default function NuevaHoja() {
     if (!trabajo.trim()) return Alert.alert('Faltan datos', 'Describa el trabajo realizado.');
     const sinStock = materiales.find((m) => m.articulo_id && Number(m.cantidad) > (articulos.find((a) => String(a.id) === m.articulo_id)?.stock ?? 0));
     if (sinStock) return Alert.alert('Stock insuficiente', `No hay suficiente «${sinStock.descripcion}» en el almacén.`);
-    if (firmaReceptor && !receptor.trim()) return Alert.alert('Falta el nombre', 'Indique el nombre de quien firma por el cliente.');
+    if (incidencia && CONTINUA.includes(resultado)) {
+      if (!pendientes.trim()) return Alert.alert('¿Qué queda pendiente?', 'Indique qué falta hacer en la próxima visita.');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(proximaVisita) || proximaVisita < hoy()) return Alert.alert('Próxima visita', 'Indique una fecha válida (AAAA-MM-DD), de hoy en adelante.');
+    }
 
     setEnviando(true);
     try {
@@ -174,7 +189,20 @@ export default function NuevaHoja() {
       if (incidencia) {
         form.append('diagnostico', diagnostico.trim());
         form.append('resultado', resultado);
+        if (CONTINUA.includes(resultado)) {
+          form.append('pendientes', pendientes.trim());
+          form.append('proxima_visita', proximaVisita);
+        }
       }
+      verificaciones.forEach((v, i) => {
+        form.append(`verificaciones[${i}][item]`, v.item);
+        form.append(`verificaciones[${i}][resultado]`, v.resultado);
+      });
+      mediciones.filter((m) => m.parametro.trim() && m.valor.trim()).forEach((m, i) => {
+        form.append(`mediciones[${i}][parametro]`, m.parametro.trim());
+        form.append(`mediciones[${i}][valor]`, m.valor.trim());
+        if (m.unidad.trim()) form.append(`mediciones[${i}][unidad]`, m.unidad.trim());
+      });
       form.append('trabajo_realizado', trabajo.trim());
       if (observaciones.trim()) form.append('observaciones', observaciones.trim());
       if (recomendaciones.trim()) form.append('recomendaciones', recomendaciones.trim());
@@ -191,16 +219,14 @@ export default function NuevaHoja() {
       materiales.filter((m) => m.descripcion.trim()).forEach((m, i) => {
         Object.entries(m).filter(([, v]) => v !== '').forEach(([k, v]) => form.append(`materiales[${i}][${k}]`, v));
       });
-      fotos.forEach((f, i) => adjuntar(form, `fotos[${i}]`, f));
-
-      if (firmaReceptor) {
-        form.append('receptor_nombre', receptor.trim());
-        if (dni.trim()) form.append('receptor_dni', dni.trim());
-        if (cargo.trim()) form.append('receptor_cargo', cargo.trim());
-        form.append('conforme', conforme ? '1' : '0');
-        form.append('firma_receptor', firmaJson(firmaReceptor));
-        if (firmaTecnico) form.append('firma_tecnico', firmaJson(firmaTecnico));
-      }
+      fotos.forEach((f, i) => {
+        adjuntar(form, `fotos[${i}]`, f);
+        if (f.descripcion.trim()) form.append(`fotos_descripcion[${i}]`, f.descripcion.trim());
+      });
+      actas.forEach((a, i) => adjuntar(form, `actas[${i}]`, a));
+      if (receptor.trim()) form.append('receptor_nombre', receptor.trim());
+      if (dni.trim()) form.append('receptor_dni', dni.trim());
+      if (cargo.trim()) form.append('receptor_cargo', cargo.trim());
 
       const { granted } = await Location.requestForegroundPermissionsAsync().catch(() => ({ granted: false }));
       if (granted) {
@@ -212,7 +238,10 @@ export default function NuevaHoja() {
       }
 
       const hoja = await api.crearHoja(form);
-      Alert.alert(`Hoja ${hoja.numero}`, hoja.estado === 'firmada' ? 'Registrada y firmada.' : 'Registrada. Queda pendiente la firma del cliente.');
+      Alert.alert(`Hoja ${hoja.numero} guardada`, [
+        hoja.proxima_visita ? `La incidencia continúa: próxima visita el ${hoja.proxima_visita.split('-').reverse().join('/')}.` : null,
+        hoja.tiene_acta ? 'El acta de conformidad quedó registrada.' : 'Falta subir el acta firmada por el cliente (puede hacerlo desde la hoja).',
+      ].filter(Boolean).join('\n\n'));
       router.replace(`/hojas/${hoja.id}`);
     } catch (e) {
       Alert.alert('No se pudo guardar', (e as Error).message);
@@ -274,7 +303,25 @@ export default function NuevaHoja() {
           </View>
         </Card>
 
-        <Card titulo={`2. Equipos intervenidos (${equipos.length})`}>
+        {verificaciones.length ? (
+          <Card titulo="2. Verificaciones previas">
+            {verificaciones.map((v, i) => (
+              <View key={v.item} style={s.punto}>
+                <Text style={{ color: color.text, fontSize: 13, marginBottom: 6 }}>{v.item}</Text>
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  {([['ok', 'Sí', '#059669'], ['no', 'No', '#dc2626'], ['na', 'N/A', '#64748b']] as const).map(([val, txt, fondo]) => (
+                    <Pressable key={val} onPress={() => setVerificaciones((l) => l.map((x, j) => (j === i ? { ...x, resultado: val } : x)))}
+                               style={[s.puntoBtn, v.resultado === val && { backgroundColor: fondo, borderColor: fondo }]}>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: v.resultado === val ? '#fff' : color.textMuted }}>{txt}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            ))}
+          </Card>
+        ) : null}
+
+        <Card titulo={`3. Equipos intervenidos (${equipos.length})`}>
           {equipos.map((e, i) => {
             const cambiar = (c: Partial<Equipo>) => setEquipos((l) => l.map((x, j) => (j === i ? { ...x, ...c } : x)));
             return (
@@ -358,17 +405,30 @@ export default function NuevaHoja() {
           <Boton variante="secondary" texto="＋ Equipo nuevo" style={{ marginTop: 8 }} onPress={() => setEquipos((l) => [...l, { ...equipoVacio }])} />
         </Card>
 
-        <Card titulo={incidencia ? '3. Diagnóstico y trabajo realizado' : '3. Trabajo realizado'}>
+        <Card titulo={incidencia ? '4. Diagnóstico y trabajo realizado' : '4. Trabajo realizado'}>
           {incidencia ? <Campo label="Diagnóstico" value={diagnostico} onChangeText={setDiagnostico} multiline placeholder="¿Qué encontró? ¿Cuál es la causa?" requerido /> : null}
           <Campo label="Trabajo realizado" value={trabajo} onChangeText={setTrabajo} multiline requerido />
-          {incidencia ? (
-            <>
-              <Text style={s.label}>Resultado *</Text>
-              <View style={s.chips}>{RESULTADOS.map((r) => <Chip key={r.valor} texto={r.texto} activo={resultado === r.valor} onPress={() => setResultado(r.valor)} />)}</View>
-            </>
-          ) : null}
-          <Campo label="Observaciones" value={observaciones} onChangeText={setObservaciones} multiline />
-          <Campo label="Recomendaciones al cliente" value={recomendaciones} onChangeText={setRecomendaciones} multiline />
+
+          <Text style={s.label}>Mediciones (opcional)</Text>
+          {mediciones.map((m, i) => {
+            const cambiar = (c: Partial<Medicion>) => setMediciones((l) => l.map((x, j) => (j === i ? { ...x, ...c } : x)));
+            return (
+              <View key={i} style={{ flexDirection: 'row', gap: 6, marginBottom: 8 }}>
+                <TextInput value={m.parametro} onChangeText={(t) => cambiar({ parametro: t })} placeholder="Parámetro" placeholderTextColor="#94a3b8" style={[s.input, { flex: 1, marginBottom: 0 }]} />
+                <TextInput value={m.valor} onChangeText={(t) => cambiar({ valor: t })} keyboardType="decimal-pad" placeholder="Valor" placeholderTextColor="#94a3b8" style={[s.input, { width: 70, marginBottom: 0 }]} />
+                <TextInput value={m.unidad} onChangeText={(t) => cambiar({ unidad: t })} placeholder="Unid." placeholderTextColor="#94a3b8" style={[s.input, { width: 54, marginBottom: 0 }]} />
+                <Pressable onPress={() => setMediciones((l) => l.filter((_, j) => j !== i))} hitSlop={8} style={{ justifyContent: 'center' }}>
+                  <Text style={{ color: color.danger, fontWeight: '700' }}>✕</Text>
+                </Pressable>
+              </View>
+            );
+          })}
+          <View style={s.chips}>
+            <Chip texto="+ Tensiones" activo={false} onPress={() => setMediciones((l) => [...l, ...['R-S', 'S-T', 'T-R', 'N-T'].map((p) => ({ parametro: `Tensión ${p}`, valor: '', unidad: 'V' }))])} />
+            <Chip texto="+ Corrientes" activo={false} onPress={() => setMediciones((l) => [...l, ...['Ir', 'Is', 'It'].map((p) => ({ parametro: `Corriente ${p}`, valor: '', unidad: 'A' }))])} />
+            <Chip texto="+ Temperatura" activo={false} onPress={() => setMediciones((l) => [...l, { parametro: 'Temperatura del ambiente', valor: '', unidad: '°C' }])} />
+            <Chip texto="+ Otra" activo={false} onPress={() => setMediciones((l) => [...l, { parametro: '', valor: '', unidad: '' }])} />
+          </View>
 
           <Text style={s.label}>Materiales / repuestos</Text>
           {materiales.map((m, i) => {
@@ -403,36 +463,70 @@ export default function NuevaHoja() {
           {materiales.some((m) => m.articulo_id) ? <Text style={[s.tenue, { marginTop: 6 }]}>Los materiales del almacén se descuentan de su stock al guardar.</Text> : null}
 
           <Text style={[s.label, { marginTop: 16 }]}>Fotos ({fotos.length})</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
-            {fotos.map((f, i) => (
-              <Pressable key={f.uri} onLongPress={() => setFotos((l) => l.filter((_, j) => j !== i))}>
+          {fotos.map((f, i) => (
+            <View key={f.uri} style={{ flexDirection: 'row', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+              <Pressable onLongPress={() => setFotos((l) => l.filter((_, j) => j !== i))}>
                 <Image source={{ uri: f.uri }} style={s.foto} />
               </Pressable>
-            ))}
-          </View>
+              <TextInput value={f.descripcion} onChangeText={(t) => setFotos((l) => l.map((x, j) => (j === i ? { ...x, descripcion: t } : x)))}
+                         placeholder="Leyenda (ej. Ubicación del UPS)" placeholderTextColor="#94a3b8" style={[s.input, { flex: 1, marginBottom: 0 }]} />
+            </View>
+          ))}
           <View style={{ flexDirection: 'row', gap: 10 }}>
             <Boton style={{ flex: 1 }} variante="secondary" texto="📷 Cámara" onPress={() => agregarFotos(tomarFoto)} />
             <Boton style={{ flex: 1 }} variante="secondary" texto="🖼️ Galería" onPress={() => agregarFotos(elegirDeGaleria)} />
           </View>
-          {fotos.length ? <Text style={[s.tenue, { marginTop: 6 }]}>Mantenga presionada una foto para quitarla.</Text> : null}
+          {fotos.length ? <Text style={[s.tenue, { marginTop: 6 }]}>La leyenda sale debajo de cada foto en la hoja impresa. Mantenga presionada una foto para quitarla.</Text> : null}
         </Card>
 
-        <Card titulo="4. Conformidad y firmas">
-          <Text style={[s.tenue, { marginBottom: 12 }]}>Si el responsable no puede firmar ahora, deje la firma en blanco y fírmela después desde la hoja.</Text>
-          <Campo label="Nombre de quien recibe" value={receptor} onChangeText={setReceptor} />
+        <Card titulo="5. Resultado de la visita">
+          {incidencia ? (
+            <>
+              {RESULTADOS.map((r) => (
+                <Pressable key={r.valor} onPress={() => setResultado(r.valor)} style={[s.resultado, resultado === r.valor && s.resultadoActivo]}>
+                  <Text style={{ fontWeight: '700', color: resultado === r.valor ? color.brand : color.text }}>{r.texto}</Text>
+                </Pressable>
+              ))}
+              {CONTINUA.includes(resultado) ? (
+                <View style={s.continua}>
+                  <Text style={{ color: '#92400e', fontSize: 13, marginBottom: 10 }}>Lo de hoy queda guardado en esta hoja. Indique qué falta y cuándo vuelve: la incidencia sigue en proceso.</Text>
+                  <Campo label="¿Qué queda pendiente?" value={pendientes} onChangeText={setPendientes} multiline requerido placeholder="Ej. Cambiar 4 baterías; el repuesto llega el jueves" />
+                  <Campo label="Próxima visita (AAAA-MM-DD)" value={proximaVisita} onChangeText={setProximaVisita} keyboardType="numbers-and-punctuation" requerido />
+                  <View style={s.chips}>
+                    <Chip texto="Mañana" activo={proximaVisita === manana()} onPress={() => setProximaVisita(manana())} />
+                    {[2, 3, 7].map((d) => {
+                      const f = fechaIso(new Date(Date.now() + d * 86_400_000));
+                      return <Chip key={d} texto={`En ${d} días`} activo={proximaVisita === f} onPress={() => setProximaVisita(f)} />;
+                    })}
+                  </View>
+                </View>
+              ) : null}
+            </>
+          ) : null}
+          <Campo label="Observaciones" value={observaciones} onChangeText={setObservaciones} multiline />
+          <Campo label="Recomendaciones al cliente" value={recomendaciones} onChangeText={setRecomendaciones} multiline />
+        </Card>
+
+        <Card titulo="6. Conformidad del cliente">
+          <Text style={[s.tenue, { marginBottom: 12 }]}>El cliente firma la hoja impresa (o su propia acta). Tome una foto del acta firmada y súbala aquí o después, desde la hoja.</Text>
+          <Campo label="Recibe el servicio (nombre)" value={receptor} onChangeText={setReceptor} />
           <View style={{ flexDirection: 'row', gap: 10 }}>
-            <View style={{ flex: 1 }}><Campo label="DNI" value={dni} onChangeText={setDni} keyboardType="number-pad" maxLength={15} /></View>
+            <View style={{ flex: 1 }}><Campo label="DNI" value={dni} onChangeText={setDni} keyboardType="number-pad" maxLength={12} /></View>
             <View style={{ flex: 1 }}><Campo label="Cargo" value={cargo} onChangeText={setCargo} /></View>
           </View>
-          <View style={s.conforme}>
-            <Text style={{ flex: 1, color: '#065f46', fontWeight: '600' }}>El cliente da conformidad al servicio</Text>
-            <Switch value={conforme} onValueChange={setConforme} />
+          {actas.map((a, i) => (
+            <View key={a.uri} style={s.acta}>
+              <Text style={{ flex: 1, color: '#065f46', fontWeight: '600' }} numberOfLines={1}>📄 {a.nombre}</Text>
+              <Pressable onPress={() => setActas((l) => l.filter((_, j) => j !== i))} hitSlop={8}><Text style={{ color: color.danger, fontWeight: '700' }}>✕</Text></Pressable>
+            </View>
+          ))}
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Boton style={{ flex: 1 }} variante="secondary" texto="📷 Foto del acta" onPress={async () => { const n = await tomarFoto(); if (n.length) setActas((l) => [...l, ...n]); }} />
+            <Boton style={{ flex: 1 }} variante="secondary" texto="📎 Archivo / PDF" onPress={async () => { const n = await elegirDocumento(); if (n.length) setActas((l) => [...l, ...n]); }} />
           </View>
-          <CampoFirma titulo="Firma del responsable del cliente" firma={firmaReceptor} onChange={setFirmaReceptor} />
-          <CampoFirma titulo="Firma del técnico" firma={firmaTecnico} onChange={setFirmaTecnico} />
         </Card>
 
-        <Boton texto={firmaReceptor ? 'Guardar hoja firmada' : 'Guardar (pendiente de firma)'} onPress={guardar} cargando={enviando} />
+        <Boton texto={actas.length ? 'Guardar hoja con acta' : 'Guardar hoja de servicio'} onPress={guardar} cargando={enviando} />
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -453,5 +547,8 @@ const s = StyleSheet.create({
   inventario: { borderWidth: 1, borderColor: color.border, borderRadius: 12, paddingHorizontal: 10, marginBottom: 10, maxHeight: 320 },
   bloque: { borderWidth: 1, borderColor: color.border, borderRadius: 12, padding: 10, marginBottom: 10 },
   foto: { width: 72, height: 72, borderRadius: 8 },
-  conforme: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#ecfdf5', borderRadius: 10, padding: 12, marginBottom: 14 },
+  resultado: { borderWidth: 1, borderColor: color.border, borderRadius: 10, padding: 12, marginBottom: 8, backgroundColor: '#fff' },
+  resultadoActivo: { borderColor: color.brand, backgroundColor: color.brandSoft },
+  continua: { backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fde68a', borderRadius: 12, padding: 12, marginTop: 4, marginBottom: 12 },
+  acta: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ecfdf5', borderRadius: 10, padding: 10, marginBottom: 8 },
 });

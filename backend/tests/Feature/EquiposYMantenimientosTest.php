@@ -250,6 +250,27 @@ class EquiposYMantenimientosTest extends TestCase
             ->assertOk()->assertJsonPath('data.equipo.codigo', $laptop->codigo)->assertJsonPath('data.cobertura', 'contrato');
     }
 
+    public function test_las_visitas_del_plan_no_pasan_la_vigencia_de_la_garantia(): void
+    {
+        // La garantía del setUp vence dentro de 2 meses: con visitas mensuales caben 3 (hoy, +1 y +2 meses).
+        $vence = $this->garantia->fecha_vencimiento->format('d/m/Y');
+        $cuarta = today()->addMonthsNoOverflow(3)->format('d/m/Y');
+        $datos = [
+            'proyecto_id' => $this->proyecto->id, 'garantia_id' => $this->garantia->id, 'nombre' => 'Preventivo mensual',
+            'frecuencia_meses' => 1, 'total_visitas' => 4, 'fecha_inicio' => today()->toDateString(),
+        ];
+
+        $this->actingAs($this->supervisor)->post('/planes-mantenimiento', $datos)
+            ->assertSessionHasErrors(['total_visitas' => "La garantía {$this->garantia->codigo} vence el $vence: con visitas cada 1 mes solo caben 3 dentro de la vigencia (la visita 4 caería el $cuarta)."]);
+        $this->assertSame(0, PlanMantenimiento::count());
+
+        $this->post('/planes-mantenimiento', ['fecha_inicio' => today()->addMonths(3)->toDateString()] + $datos)
+            ->assertSessionHasErrors('fecha_inicio');
+
+        $this->post('/planes-mantenimiento', ['total_visitas' => 3] + $datos)->assertSessionHasNoErrors();
+        $this->assertTrue(PlanMantenimiento::sole()->mantenimientos->every(fn ($m) => $m->fecha_programada->lte($this->garantia->fecha_vencimiento)));
+    }
+
     public function test_plan_de_mantenimiento_programa_visitas_y_la_hoja_las_cierra(): void
     {
         $this->actingAs($this->supervisor)->post('/planes-mantenimiento', [
@@ -338,5 +359,80 @@ class EquiposYMantenimientosTest extends TestCase
         $this->assertSame('2026-03-15', $nueva->fecha_instalacion->toDateString());
         $this->assertSame($this->garantia->id, $nueva->garantia_id);
         $this->assertSame(1, $nueva->eventos()->count());
+    }
+
+    public function test_el_qr_abre_la_ficha_publica_sin_iniciar_sesion(): void
+    {
+        $equipo = Equipo::create(['entidad_id' => $this->cliente->id, 'proyecto_id' => $this->proyecto->id, 'categoria' => 'UPS', 'marca' => 'Riello', 'serie' => 'DMSTK20']);
+        \App\Services\EquipoService::registrarEvento($equipo, 'mantenimiento', 'Mantenimiento preventivo del banco de baterías', ['user_id' => $this->tecnico->id]);
+
+        // El QR usa la dirección pública configurada y un código aleatorio (no el correlativo)
+        \App\Support\Ajustes::set(['url_publica' => 'https://sggp.techquk.com.pe']);
+        $this->assertMatchesRegularExpression('#^https://sggp\.techquk\.com\.pe/e/[a-z0-9]{20}$#', $equipo->contenidoQr());
+
+        $this->get("/e/{$equipo->token_publico}")->assertOk()
+            ->assertSee($equipo->codigo)->assertSee('Mantenimiento preventivo del banco de baterías')->assertSee('Clínica Privada SAC');
+        $this->get('/e/codigoinexistente123')->assertNotFound();
+
+        // La app reconoce el QR nuevo
+        $token = $this->tecnico->createToken('app')->plainTextToken;
+        $this->getJson('/api/equipos/codigo/'.urlencode($equipo->contenidoQr()), ['Authorization' => "Bearer $token"])
+            ->assertOk()->assertJsonPath('data.codigo', $equipo->codigo);
+    }
+
+    public function test_el_correo_se_configura_desde_la_web(): void
+    {
+        $admin = User::factory()->create()->assignRole('Administrador');
+
+        $this->actingAs($admin)->get('/admin/configuracion')->assertOk()->assertSee('Correo saliente (SMTP)');
+
+        \App\Support\Ajustes::set([
+            'correo_host' => 'smtp.gmail.com', 'correo_puerto' => 587, 'correo_cifrado' => 'tls',
+            'correo_usuario' => 'avisos@techquk.com.pe', 'correo_clave' => \App\Support\Correo::cifrarClave('clave-de-aplicacion'),
+        ]);
+        \App\Support\Correo::aplicar();
+
+        $this->assertSame('smtp', config('mail.default'));
+        $this->assertSame('smtp.gmail.com', config('mail.mailers.smtp.host'));
+        $this->assertSame('clave-de-aplicacion', config('mail.mailers.smtp.password'));
+        $this->assertSame('avisos@techquk.com.pe', config('mail.from.address'));
+        $this->assertTrue(\App\Support\Correo::activo());
+    }
+
+    public function test_editar_serie_y_ubicacion_y_subir_fei_desde_el_proyecto(): void
+    {
+        $this->actingAs($this->supervisor)->post(route('proyectos.equipos.store', $this->proyecto), [
+            'equipos' => [['categoria' => 'Cámara IP', 'cantidad' => 2, 'ubicacion' => 'Almacén']],
+        ]);
+        [$a, $b] = $this->proyecto->equipos()->orderBy('id')->get()->all();
+
+        // Serie repetida entre filas: no se guarda nada
+        $this->put(route('proyectos.equipos.update', $this->proyecto), ['editar' => [
+            $a->id => ['serie' => 'SN-1', 'ubicacion' => 'Poste 14'],
+            $b->id => ['serie' => 'SN-1', 'ubicacion' => 'Almacén'],
+        ]])->assertSessionHasErrors("editar.{$b->id}.serie");
+        $this->assertNull($a->fresh()->serie);
+
+        $this->put(route('proyectos.equipos.update', $this->proyecto), ['editar' => [
+            $a->id => ['serie' => 'SN-1', 'ubicacion' => 'Poste 14'],
+            $b->id => ['serie' => 'SN-2', 'ubicacion' => 'Almacén'],
+        ]])->assertSessionHasNoErrors();
+        $this->assertSame(['SN-1', 'Poste 14'], [$a->fresh()->serie, $a->fresh()->ubicacion]);
+        $this->assertDatabaseHas('equipo_eventos', ['equipo_id' => $a->id, 'tipo' => 'traslado']);
+
+        $this->post(route('archivos.store', ['tipo' => 'equipo', 'id' => $a->id]), [
+            'categoria' => 'foto_instalacion', 'archivos' => [UploadedFile::fake()->image('poste.jpg')],
+        ])->assertSessionHasNoErrors();
+        $this->assertSame('foto_instalacion', $a->fresh()->fotoInstalacion->categoria->value);
+
+        $this->get(route('proyectos.show', $this->proyecto))->assertOk()
+            ->assertSee('FEI')->assertSee('Guardar serie y ubicación')->assertSee('value="SN-1"', false);
+
+        // El informe de un proyecto de implementación usa las fechas de la ficha y lista los equipos con su FEI
+        $this->proyecto->update(['clase' => 'implementacion', 'fecha_inicio' => today()->subMonths(2), 'fecha_entrega' => today()->subMonth()]);
+        $datos = app(\App\Services\InformeClienteService::class)->datos($this->proyecto->fresh(), today()->subMonths(2), now());
+        $this->assertCount(2, $datos['equipos']);
+        $this->assertStringStartsWith('data:image/', $datos['feis'][$a->id]['src']);
+        $this->get(route('proyectos.informe', $this->proyecto))->assertOk()->assertHeader('content-type', 'application/pdf');
     }
 }

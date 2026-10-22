@@ -5,6 +5,7 @@ namespace App\Enums;
 enum CategoriaArchivo: string
 {
     case Foto = 'foto';
+    case FotoInstalacion = 'foto_instalacion';
     case ActaConformidad = 'acta_conformidad';
     case InformeTecnico = 'informe_tecnico';
     case Contrato = 'contrato';
@@ -16,6 +17,7 @@ enum CategoriaArchivo: string
     {
         return match ($this) {
             self::Foto => 'Fotografía',
+            self::FotoInstalacion => 'Foto del equipo instalado (FEI)',
             self::ActaConformidad => 'Acta de conformidad',
             self::InformeTecnico => 'Informe técnico',
             self::Contrato => 'Contrato',

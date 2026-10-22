@@ -128,56 +128,15 @@ Alpine.data('filasEquipos', (iniciales, vacia, checklists) => ({
     },
 }));
 
-// Pad de firma manuscrita (mouse, dedo o lápiz). Guarda un PNG en base64 en un input oculto.
-Alpine.data('firmaPad', () => ({
-    vacio: true,
-    dibujando: false,
-    ctx: null,
-    init() {
-        const c = this.$refs.canvas;
-        const ajustar = () => {
-            const ratio = window.devicePixelRatio || 1;
-            const ancho = c.offsetWidth;
-            c.width = ancho * ratio;
-            c.height = 180 * ratio;
-            this.ctx = c.getContext('2d');
-            this.ctx.scale(ratio, ratio);
-            this.ctx.lineWidth = 2.2;
-            this.ctx.lineCap = 'round';
-            this.ctx.lineJoin = 'round';
-            this.ctx.strokeStyle = '#0f172a';
-            this.limpiar();
-        };
-        ajustar();
-        c.addEventListener('pointerdown', (e) => {
-            this.dibujando = true;
-            c.setPointerCapture(e.pointerId);
-            this.ctx.beginPath();
-            this.ctx.moveTo(e.offsetX, e.offsetY);
-        });
-        c.addEventListener('pointermove', (e) => {
-            if (!this.dibujando) return;
-            this.ctx.lineTo(e.offsetX, e.offsetY);
-            this.ctx.stroke();
-            this.vacio = false;
-        });
-        const terminar = () => {
-            if (!this.dibujando) return;
-            this.dibujando = false;
-            if (!this.vacio) this.$refs.valor.value = c.toDataURL('image/png');
-        };
-        c.addEventListener('pointerup', terminar);
-        c.addEventListener('pointerleave', terminar);
-    },
-    limpiar() {
-        const c = this.$refs.canvas;
-        this.ctx.save();
-        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
-        this.ctx.fillStyle = '#ffffff';
-        this.ctx.fillRect(0, 0, c.width, c.height);
-        this.ctx.restore();
-        this.vacio = true;
-        this.$refs.valor.value = '';
+// Fotos de la hoja de servicio: vista previa y leyenda de cada una (sale en el PDF).
+Alpine.data('fotosConLeyenda', () => ({
+    fotos: [],
+    elegir(e) {
+        this.fotos.forEach((f) => URL.revokeObjectURL(f.url));
+        this.fotos = [...e.target.files].map((file) => ({
+            url: URL.createObjectURL(file),
+            leyenda: file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' '),
+        }));
     },
 }));
 

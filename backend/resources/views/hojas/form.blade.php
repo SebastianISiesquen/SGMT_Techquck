@@ -11,6 +11,8 @@
             : ($equiposIniciales ?? [$equipoVacio]));
         $materiales = old('materiales', $hoja->exists ? $hoja->materiales->map->only(array_keys($materialVacio))->all() : []);
         $deIncidencia = (bool) ($incidencia ?? $hoja->incidencia_id);
+        $verificaciones = old('verificaciones', $hoja->verificaciones ?? collect(\App\Support\Ajustes::catalogo('verificaciones_previas'))->map(fn ($i) => ['item' => $i, 'resultado' => 'ok'])->all());
+        $mediciones = old('mediciones', $hoja->mediciones ?? []);
         $hora = fn ($v) => $v ? substr($v, 0, 5) : null;
     @endphp
 
@@ -24,6 +26,14 @@
             <input type="hidden" name="mantenimiento_id" value="{{ $mantenimiento->id }}">
             <div class="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
                 <x-icon name="calendar" class="size-4" /> {{ $mantenimiento->etiqueta() }} programado para el {{ $mantenimiento->fecha_programada->format('d/m/Y') }}. Al guardar la hoja, la visita queda como realizada.
+            </div>
+        @endif
+
+        @if (! empty($anterior))
+            <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <p class="flex items-center gap-2 font-semibold"><x-icon name="refresh" class="size-4" /> Continuación de la visita del {{ $anterior->fecha->format('d/m/Y') }} (hoja {{ $anterior->numero }})</p>
+                @if ($anterior->pendientes)<p class="mt-1">Quedó pendiente: {{ $anterior->pendientes }}</p>@endif
+                <p class="mt-1 text-xs text-amber-800">Se cargaron los equipos y el diagnóstico de esa visita. Lo que registre hoy se guarda en una hoja nueva.</p>
             </div>
         @endif
 
@@ -63,10 +73,34 @@
             </div>
         </div>
 
-        {{-- 2. Equipos intervenidos (del inventario del cliente o nuevos) --}}
+        {{-- 2. Verificaciones previas de seguridad --}}
+        @if ($verificaciones)
+            <div class="card" x-data="{ items: @js(array_values($verificaciones)) }">
+                <div class="card-header">
+                    <h3 class="card-title">2. Verificaciones previas en sitio</h3>
+                    <span class="text-xs text-slate-500">Antes de iniciar el trabajo</span>
+                </div>
+                <div class="card-body grid gap-2 md:grid-cols-2">
+                    <template x-for="(v, i) in items" :key="i">
+                        <div class="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
+                            <input type="hidden" :name="`verificaciones[${i}][item]`" :value="v.item">
+                            <input type="hidden" :name="`verificaciones[${i}][resultado]`" :value="v.resultado">
+                            <span class="text-sm text-slate-700" x-text="v.item"></span>
+                            <div class="flex shrink-0 overflow-hidden rounded-md border border-slate-200 text-xs">
+                                <button type="button" class="px-2.5 py-1" @click="v.resultado = 'ok'" :class="v.resultado === 'ok' ? 'bg-emerald-600 text-white' : 'bg-white text-slate-600'">Sí</button>
+                                <button type="button" class="px-2.5 py-1" @click="v.resultado = 'no'" :class="v.resultado === 'no' ? 'bg-red-600 text-white' : 'bg-white text-slate-600'">No</button>
+                                <button type="button" class="px-2.5 py-1" @click="v.resultado = 'na'" :class="v.resultado === 'na' ? 'bg-slate-500 text-white' : 'bg-white text-slate-600'">N/A</button>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        @endif
+
+        {{-- 3. Equipos intervenidos (del inventario del cliente o nuevos) --}}
         <div class="card" x-data="filasEquipos(@js(array_values($equipos)), @js($equipoVacio), @js($checklists))">
             <div class="card-header">
-                <h3 class="card-title">2. Equipos intervenidos</h3>
+                <h3 class="card-title">3. Equipos intervenidos</h3>
                 <div class="flex flex-wrap items-center gap-2">
                     <select class="input py-1.5 text-sm" x-show="equipos.length" x-cloak
                             @change="if ($event.target.value) { agregarInventario(equipos.find(o => String(o.id) === $event.target.value)); $event.target.value = '' }">
@@ -134,19 +168,37 @@
 
         {{-- 3. Trabajo realizado y materiales --}}
         <div class="card">
-            <div class="card-header"><h3 class="card-title">3. {{ $deIncidencia ? 'Diagnóstico y trabajo realizado' : 'Trabajo realizado' }}</h3></div>
+            <div class="card-header"><h3 class="card-title">4. {{ $deIncidencia ? 'Diagnóstico y trabajo realizado' : 'Trabajo realizado' }}</h3></div>
             <div class="card-body grid gap-4 sm:grid-cols-2">
                 @if ($deIncidencia)
                     <x-textarea name="diagnostico" label="Diagnóstico" :value="$hoja->diagnostico" required rows="3" class="sm:col-span-2"
                                 placeholder="¿Qué encontró? ¿Cuál es la causa de la falla?" />
                 @endif
                 <x-textarea name="trabajo_realizado" label="Trabajo realizado" :value="$hoja->trabajo_realizado" required rows="4" class="sm:col-span-2" />
-                @if ($deIncidencia)
-                    <x-select name="resultado" label="Resultado de la atención" :options="$resultados" :value="$hoja->resultado" :placeholder="false" required class="sm:col-span-2"
-                              help="«Resuelto» deja la incidencia lista para que el supervisor la cierre. «Parcial» o «Pendiente de repuesto» la mantienen en proceso." />
-                @endif
-                <x-textarea name="observaciones" label="Observaciones" :value="$hoja->observaciones" rows="3" />
-                <x-textarea name="recomendaciones" label="Recomendaciones al cliente" :value="$hoja->recomendaciones" rows="3" />
+
+                {{-- Mediciones (tensión, corriente, temperatura…) --}}
+                <div class="sm:col-span-2" x-data="filas(@js(array_values($mediciones)), { parametro: '', valor: '', unidad: '' })">
+                    <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <span class="label mb-0">Mediciones <span class="font-normal text-slate-400">(opcional)</span></span>
+                        <div class="flex flex-wrap gap-1 text-xs">
+                            <button type="button" class="rounded bg-slate-100 px-2 py-1 hover:bg-brand-50" @click="['R-S','S-T','T-R','R-N','S-N','T-N','N-T'].forEach(p => filas.push({ parametro: 'Tensión ' + p, valor: '', unidad: 'V' }))">+ Tensiones</button>
+                            <button type="button" class="rounded bg-slate-100 px-2 py-1 hover:bg-brand-50" @click="['R','S','T','N'].forEach(p => filas.push({ parametro: 'Corriente I' + p.toLowerCase(), valor: '', unidad: 'A' }))">+ Corrientes</button>
+                            <button type="button" class="rounded bg-slate-100 px-2 py-1 hover:bg-brand-50" @click="filas.push({ parametro: 'Temperatura del ambiente', valor: '', unidad: '°C' })">+ Temperatura</button>
+                            <button type="button" class="rounded bg-slate-100 px-2 py-1 hover:bg-brand-50" @click="agregar()">+ Otra</button>
+                        </div>
+                    </div>
+                    <div class="grid gap-2 md:grid-cols-2">
+                        <template x-for="(f, i) in filas" :key="i">
+                            <div class="flex gap-2">
+                                <input :name="`mediciones[${i}][parametro]`" x-model="f.parametro" placeholder="Parámetro" class="input flex-1">
+                                <input :name="`mediciones[${i}][valor]`" x-model="f.valor" placeholder="Valor" class="input w-24">
+                                <input :name="`mediciones[${i}][unidad]`" x-model="f.unidad" placeholder="Unid." class="input w-16">
+                                <button type="button" class="btn btn-ghost px-2 text-slate-400 hover:text-red-600" @click="quitar(i)"><x-icon name="trash" class="size-4" /></button>
+                            </div>
+                        </template>
+                    </div>
+                    <p x-show="!filas.length" class="text-sm text-slate-500">Sin mediciones. Use los botones para agregar las habituales.</p>
+                </div>
 
                 <div class="sm:col-span-2" x-data="{ ...filas(@js(array_values($materiales)), @js($materialVacio)), articulos: @js($articulos) }">
                     <div class="mb-2 flex items-center justify-between">
@@ -172,34 +224,78 @@
                 </div>
 
                 @unless ($hoja->exists)
-                    <div class="sm:col-span-2">
-                        <label class="label">Fotos del servicio (antes / después)</label>
-                        <input type="file" name="fotos[]" multiple accept="image/*" class="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-brand-700">
+                    <div class="sm:col-span-2" x-data="fotosConLeyenda">
+                        <label class="label" for="f_fotos">Fotos del servicio (antes / durante / después)</label>
+                        <input id="f_fotos" type="file" name="fotos[]" multiple accept="image/*" @change="elegir($event)"
+                               class="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-brand-700">
+                        <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3" x-show="fotos.length" x-cloak>
+                            <template x-for="(f, i) in fotos" :key="f.url">
+                                <div class="overflow-hidden rounded-lg border border-slate-200">
+                                    <img :src="f.url" class="h-32 w-full bg-slate-50 object-contain">
+                                    <input :name="`fotos_descripcion[${i}]`" x-model="f.leyenda" placeholder="Leyenda (ej. Ubicación del UPS)" class="w-full border-0 border-t border-slate-200 px-2 py-1.5 text-xs">
+                                </div>
+                            </template>
+                        </div>
+                        <p class="help">La leyenda aparece debajo de cada foto en el registro fotográfico de la hoja impresa.</p>
                         @error('fotos.*')<p class="error">{{ $message }}</p>@enderror
                     </div>
                 @endunless
             </div>
         </div>
 
-        {{-- 4. Conformidad y firmas --}}
+        {{-- 5. Resultado de la visita --}}
+        <div class="card" x-data="{ resultado: '{{ old('resultado', $hoja->resultado ?? ($deIncidencia ? 'resuelto' : '')) }}' }">
+            <div class="card-header"><h3 class="card-title">5. Resultado de la visita</h3></div>
+            <div class="card-body grid gap-4 sm:grid-cols-2">
+                @if ($deIncidencia)
+                    <div class="sm:col-span-2">
+                        <label class="label">¿Cómo quedó la incidencia? <span class="text-red-500">*</span></label>
+                        <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                            @foreach ($resultados as $k => $v)
+                                <label class="flex cursor-pointer items-start gap-2 rounded-lg border p-3 text-sm"
+                                       :class="resultado === '{{ $k }}' ? '{{ ['resuelto' => 'border-emerald-500 bg-emerald-50', 'parcial' => 'border-amber-500 bg-amber-50', 'pendiente_repuesto' => 'border-blue-500 bg-blue-50', 'no_procede' => 'border-red-500 bg-red-50'][$k] ?? 'border-brand-500' }}' : 'border-slate-200'">
+                                    <input type="radio" name="resultado" value="{{ $k }}" x-model="resultado" class="mt-0.5">
+                                    <span>{{ $v }}</span>
+                                </label>
+                            @endforeach
+                        </div>
+                        @error('resultado')<p class="error">{{ $message }}</p>@enderror
+                    </div>
+                    <div class="sm:col-span-2 grid gap-4 rounded-lg border border-amber-200 bg-amber-50/60 p-4 sm:grid-cols-3" x-show="resultado === 'parcial' || resultado === 'pendiente_repuesto'" x-cloak>
+                        <p class="text-sm text-amber-900 sm:col-span-3"><strong>No se terminó hoy:</strong> lo realizado queda guardado en esta hoja. Indique qué falta y cuándo se vuelve; la incidencia sigue en proceso.</p>
+                        <x-textarea name="pendientes" label="¿Qué queda pendiente?" :value="$hoja->pendientes" rows="2" class="sm:col-span-2"
+                                    placeholder="Ej. Cambiar 4 baterías del banco; llega el repuesto el jueves" x-bind:required="resultado === 'parcial' || resultado === 'pendiente_repuesto'" />
+                        <x-input name="proxima_visita" type="date" label="Próxima visita" :value="$hoja->proxima_visita" :min="today()->toDateString()"
+                                 x-bind:required="resultado === 'parcial' || resultado === 'pendiente_repuesto'" />
+                    </div>
+                @endif
+                <x-textarea name="observaciones" label="Observaciones" :value="$hoja->observaciones" rows="3" />
+                <x-textarea name="recomendaciones" label="Recomendaciones al cliente" :value="$hoja->recomendaciones" rows="3" />
+            </div>
+        </div>
+
+        {{-- 6. Conformidad: acta firmada a mano --}}
         <div class="card">
-            <div class="card-header"><h3 class="card-title">4. Conformidad del cliente y firmas</h3></div>
+            <div class="card-header"><h3 class="card-title">6. Conformidad del cliente</h3></div>
             <div class="card-body space-y-4">
-                <p class="text-sm text-slate-500">Si el responsable no puede firmar ahora, deje las firmas en blanco: la hoja quedará <strong>pendiente de firma</strong> y podrá firmarse después.</p>
+                <div class="grid gap-3 rounded-lg bg-slate-50 p-4 text-sm text-slate-600 sm:grid-cols-3">
+                    <p><span class="mr-1 inline-flex size-5 items-center justify-center rounded-full bg-brand-600 text-xs font-bold text-white">1</span> Guarde la hoja e imprímala (botón PDF).</p>
+                    <p><span class="mr-1 inline-flex size-5 items-center justify-center rounded-full bg-brand-600 text-xs font-bold text-white">2</span> El responsable del cliente la firma y sella.</p>
+                    <p><span class="mr-1 inline-flex size-5 items-center justify-center rounded-full bg-brand-600 text-xs font-bold text-white">3</span> Suba la foto o el escaneo del acta firmada.</p>
+                </div>
                 <div class="grid gap-4 sm:grid-cols-3">
-                    <x-input name="receptor_nombre" label="Nombre de quien recibe" :value="$hoja->receptor_nombre" />
+                    <x-input name="receptor_nombre" label="Recibe el servicio (nombre)" :value="$hoja->receptor_nombre" />
                     <x-input name="receptor_dni" label="DNI / carné de extranjería" :value="$hoja->receptor_dni" pattern="([0-9]{8}|[A-Za-z0-9]{9,12})" maxlength="12" data-mensaje="Ingrese un DNI de 8 dígitos o un carné de extranjería válido." />
                     <x-input name="receptor_cargo" label="Cargo" :value="$hoja->receptor_cargo" />
                 </div>
-                <label class="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
-                    <input type="hidden" name="conforme" value="0">
-                    <input type="checkbox" name="conforme" value="1" @checked(old('conforme', true)) class="mt-0.5 rounded border-emerald-400 text-emerald-600">
-                    El cliente da su <strong>conformidad</strong> al servicio realizado y los equipos quedan operativos.
-                </label>
-                <div class="grid gap-6 md:grid-cols-2">
-                    <x-firma-pad name="firma_receptor" label="Firma del responsable del cliente" />
-                    <x-firma-pad name="firma_tecnico" label="Firma del técnico" />
-                </div>
+                @unless ($hoja->exists)
+                    <div>
+                        <label class="label" for="f_actas">Acta de conformidad firmada <span class="font-normal text-slate-400">(si ya la tiene; también puede subirla después)</span></label>
+                        <input id="f_actas" type="file" name="actas[]" multiple accept="image/*,application/pdf"
+                               class="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-emerald-700">
+                        @error('actas.*')<p class="error">{{ $message }}</p>@enderror
+                    </div>
+                @endunless
             </div>
         </div>
 

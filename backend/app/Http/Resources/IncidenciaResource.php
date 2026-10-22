@@ -31,6 +31,8 @@ class IncidenciaResource extends JsonResource
             'fecha_limite' => $this->fecha_limite?->toIso8601String(),
             'fecha_asignacion' => $this->fecha_asignacion?->toIso8601String(),
             'sla_vencido' => $this->estaVencidaSla(),
+            'proxima_visita' => $this->proxima_visita?->toDateString(),
+            'motivo_reprogramacion' => $this->motivo_reprogramacion,
             'cobertura' => $this->cobertura,
             'cobertura_label' => $this->coberturaLabel(),
             'puede_atender' => in_array($this->estado->value, ['asignada', 'en_proceso']) && $this->tecnico_id === $request->user()?->id,

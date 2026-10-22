@@ -18,6 +18,9 @@ use Illuminate\Support\Facades\Notification;
  */
 class AlertaGarantiaService
 {
+    /** Motivo del último envío fallido al cliente (para mostrarlo en pantalla). */
+    public ?string $ultimoError = null;
+
     /** @return int[] hitos de mayor a menor, siempre incluye 0 (día del vencimiento) */
     public static function hitos(): array
     {
@@ -68,11 +71,15 @@ class AlertaGarantiaService
         $correosCliente = $this->correosCliente($g);
         $avisados = [];
 
-        if ($correosCliente) {
+        $this->ultimoError = null;
+        if ($correosCliente && ! \App\Support\Correo::activo()) {
+            $this->ultimoError = 'el correo del sistema no está configurado';
+        } elseif ($correosCliente) {
             try {
                 Notification::route('mail', $correosCliente)->notify(new AvisoVencimientoCliente($g, $dias));
                 $avisados = $correosCliente;
             } catch (\Throwable $e) {
+                $this->ultimoError = $e->getMessage();
                 Log::warning("No se pudo enviar el aviso de la garantía {$g->codigo} al cliente: {$e->getMessage()}");
             }
         }
