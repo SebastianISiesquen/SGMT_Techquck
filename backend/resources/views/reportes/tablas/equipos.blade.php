@@ -1,6 +1,6 @@
 <table>
     @isset($excel)
-        <tr><td colspan="13">{{ $titulo }} — {{ $empresa['empresa_nombre'] }} — {{ $generado->format('d/m/Y H:i') }}</td></tr>
+        <tr><td colspan="13">{{ $titulo }} — {{ $empresa['empresa_nombre'] }} — {{ $generado->format('d/m/Y h:i A') }}</td></tr>
     @endisset
     <thead>
     <tr><th>Código</th><th>Categoría</th><th>Marca</th><th>Modelo</th><th>Serie</th><th>Cliente</th><th>Ubicación</th><th>Responsable</th><th>Instalación</th><th>Garantía hasta</th><th>Fallas</th><th>Último mant.</th><th>Estado</th></tr>

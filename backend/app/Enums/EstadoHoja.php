@@ -2,17 +2,21 @@
 
 namespace App\Enums;
 
+/**
+ * La conformidad del cliente es el acta firmada (foto o PDF) que se sube a la hoja:
+ * Registrada (falta el acta) → Conforme (acta recibida). También puede anularse.
+ */
 enum EstadoHoja: string
 {
-    case PendienteFirma = 'pendiente_firma';
-    case Firmada = 'firmada';
+    case Registrada = 'registrada';
+    case Conforme = 'conforme';
     case Anulada = 'anulada';
 
     public function label(): string
     {
         return match ($this) {
-            self::PendienteFirma => 'Pendiente de firma',
-            self::Firmada => 'Firmada',
+            self::Registrada => 'Pendiente de acta',
+            self::Conforme => 'Con acta de conformidad',
             self::Anulada => 'Anulada',
         };
     }
@@ -20,8 +24,8 @@ enum EstadoHoja: string
     public function color(): string
     {
         return match ($this) {
-            self::PendienteFirma => 'amber',
-            self::Firmada => 'green',
+            self::Registrada => 'amber',
+            self::Conforme => 'green',
             self::Anulada => 'red',
         };
     }

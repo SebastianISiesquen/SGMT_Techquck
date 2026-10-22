@@ -16,7 +16,7 @@ use App\Models\Mantenimiento;
 use App\Models\Proyecto;
 use App\Models\User;
 use App\Services\ArchivoService;
-use App\Services\FirmaService;
+use App\Services\Pdf\Imagenes;
 use App\Services\HojaServicioService;
 use App\Support\Ajustes;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -81,6 +81,22 @@ class HojaServicioController extends Controller
             'receptor_nombre' => $incidencia?->reportado_por,
         ]);
 
+        // Segunda visita o más: se parte de lo que quedó pendiente la vez anterior.
+        $anterior = $incidencia?->hojasServicio()->where('estado', '!=', 'anulada')->with('equipos.inventario')->latest('fecha')->latest('id')->first();
+        if ($anterior) {
+            $hoja->fill([
+                'tipo_servicio' => $anterior->tipo_servicio,
+                'diagnostico' => $anterior->diagnostico,
+                'trabajo_realizado' => $anterior->pendientes ? "Continuación de la visita del {$anterior->fecha->format('d/m/Y')}. Pendiente: {$anterior->pendientes}\n" : null,
+                'hora_llegada' => now()->subHour()->format('H:i'),
+                'hora_salida' => now()->format('H:i'),
+                'observaciones' => null,
+                'receptor_nombre' => $anterior->receptor_nombre,
+                'receptor_cargo' => $anterior->receptor_cargo,
+            ]);
+        }
+        $hoja->verificaciones = collect(Ajustes::catalogo('verificaciones_previas'))->map(fn ($i) => ['item' => $i, 'resultado' => 'ok'])->all();
+
         // El equipo de la incidencia aparece ya cargado en la lista de equipos intervenidos.
         $equiposIniciales = $incidencia?->equipo ? [[
             'equipo_id' => $incidencia->equipo->id, 'codigo' => $incidencia->equipo->codigo, 'equipo' => $incidencia->equipo->categoria,
@@ -88,7 +104,15 @@ class HojaServicioController extends Controller
             'ubicacion' => $incidencia->equipo->ubicacion, 'accion' => 'reparado', 'estado_final' => 'operativo', 'observacion' => '',
         ]] : null;
 
-        return view('hojas.form', [...$this->datosFormulario($hoja), 'incidencia' => $incidencia, 'mantenimiento' => $mantenimiento, 'equiposIniciales' => $equiposIniciales]);
+        if ($anterior && $anterior->equipos->isNotEmpty()) {
+            $equiposIniciales = $anterior->equipos->map(fn ($e) => [
+                ...$e->only(['equipo_id', 'equipo', 'marca', 'modelo', 'serie', 'ubicacion', 'accion', 'estado_final']),
+                'codigo' => $e->inventario?->codigo, 'observacion' => '', 'checklist' => [],
+            ])->all();
+        }
+
+        return view('hojas.form', [...$this->datosFormulario($hoja), 'incidencia' => $incidencia, 'mantenimiento' => $mantenimiento,
+            'equiposIniciales' => $equiposIniciales, 'anterior' => $anterior]);
     }
 
     public function store(HojaServicioRequest $request)
@@ -102,12 +126,20 @@ class HojaServicioController extends Controller
             $request->input('equipos', []),
             $request->input('materiales', []),
             $request->file('fotos', []),
-            $request->firma(),
+            $request->file('actas', []),
+            'web',
+            $request->input('fotos_descripcion', []),
         );
 
-        return redirect()->route('hojas.show', $hoja)->with('ok', $hoja->estaFirmada()
-            ? "Hoja de servicio {$hoja->numero} registrada y firmada."
-            : "Hoja de servicio {$hoja->numero} registrada. Queda pendiente la firma de la entidad.");
+        $mensaje = "Hoja de servicio {$hoja->numero} registrada.";
+        if ($hoja->requiereVisita()) {
+            $mensaje .= " La incidencia continúa: próxima visita el {$hoja->proxima_visita->format('d/m/Y')}.";
+        }
+        if (! $hoja->tieneActa()) {
+            $mensaje .= ' Imprima la hoja, hágala firmar por el cliente y suba el acta firmada.';
+        }
+
+        return redirect()->route('hojas.show', $hoja)->with('ok', $mensaje);
     }
 
     public function show(HojaServicio $hoja)
@@ -123,7 +155,8 @@ class HojaServicioController extends Controller
         Gate::authorize('update', $hoja);
         $hoja->load(['equipos.inventario', 'materiales', 'incidencia.proyecto.entidad', 'mantenimiento.plan']);
 
-        return view('hojas.form', [...$this->datosFormulario($hoja), 'incidencia' => $hoja->incidencia, 'mantenimiento' => $hoja->mantenimiento, 'equiposIniciales' => null]);
+        return view('hojas.form', [...$this->datosFormulario($hoja), 'incidencia' => $hoja->incidencia, 'mantenimiento' => $hoja->mantenimiento,
+            'equiposIniciales' => null, 'anterior' => null]);
     }
 
     public function update(HojaServicioRequest $request, HojaServicio $hoja)
@@ -132,28 +165,7 @@ class HojaServicioController extends Controller
 
         $this->servicio->actualizar($hoja, $request->datosHoja(), $request->input('equipos', []), $request->input('materiales', []));
 
-        if ($firma = $request->firma()) {
-            $this->servicio->firmar($hoja, $firma);
-        }
-
         return redirect()->route('hojas.show', $hoja)->with('ok', 'Hoja de servicio actualizada.');
-    }
-
-    public function firmar(Request $request, HojaServicio $hoja)
-    {
-        Gate::authorize('update', $hoja);
-
-        $datos = $request->validate([
-            'receptor_nombre' => ['required', 'string', 'max:255'],
-            'receptor_dni' => \App\Support\Reglas::documento(),
-            'receptor_cargo' => ['nullable', 'string', 'max:255'],
-            'firma_receptor' => ['required', 'string', 'max:1500000'],
-            'firma_tecnico' => ['nullable', 'string', 'max:1500000'],
-        ], ['firma_receptor.required' => 'Falta la firma del responsable de la entidad.']);
-
-        $this->servicio->firmar($hoja, [...$datos, 'conforme' => $request->boolean('conforme')]);
-
-        return back()->with('ok', 'Hoja de servicio firmada.');
     }
 
     public function anular(Request $request, HojaServicio $hoja)
@@ -182,15 +194,17 @@ class HojaServicioController extends Controller
     {
         $hoja->load(['proyecto.entidad', 'proyecto.clienteFinal', 'garantia', 'incidencia', 'mantenimiento.plan', 'tecnico', 'equipos.inventario', 'materiales', 'archivos']);
 
-        $fotos = $hoja->archivos->filter->esImagen()->take(6)
-            ->map(fn ($a) => ['src' => ArchivoService::contenidoBase64($a), 'nombre' => $a->descripcion ?: ''])
-            ->filter(fn ($f) => $f['src']);
+        // Fotos del servicio (sin el acta), reducidas y encuadradas para el registro fotográfico
+        $fotos = Imagenes::paraPdf($hoja->archivos->filter(fn ($a) => $a->esImagen() && $a->categoria->value !== 'acta_conformidad')->take(8));
+
+        $visitasPrevias = $hoja->incidencia
+            ? $hoja->incidencia->hojasServicio()->where('id', '<', $hoja->id)->where('estado', '!=', 'anulada')->orderBy('fecha')->get()
+            : collect();
 
         return Pdf::loadView('pdf.hoja-servicio', [
             'hoja' => $hoja,
             'fotos' => $fotos,
-            'firmaReceptor' => FirmaService::base64($hoja->firma_receptor),
-            'firmaTecnico' => FirmaService::base64($hoja->firma_tecnico),
+            'visitasPrevias' => $visitasPrevias,
             'empresa' => Ajustes::all(),
         ])->setPaper('a4');
     }

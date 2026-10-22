@@ -25,6 +25,9 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // Servidor de correo configurado desde la web (Configuración → Correo)
+        \App\Support\Correo::aplicar();
+
         // El Administrador tiene acceso a todos los módulos.
         Gate::before(fn (User $user) => $user->hasRole('Administrador') ? true : null);
 

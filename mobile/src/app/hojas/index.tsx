@@ -44,7 +44,7 @@ export default function MisHojas() {
         <Pressable onPress={() => router.push(`/hojas/${item.id}`)} style={({ pressed }) => [s.item, pressed && { opacity: 0.85 }]}>
           <View style={s.fila}>
             <Text style={s.numero}>{item.numero}</Text>
-            <Badge texto={item.estado_label} tono={colorEstado[item.estado]} />
+            <Badge texto={item.estado_label} tono={item.estado === 'registrada' ? 'amber' : colorEstado[item.estado]} />
           </View>
           <Text style={s.titulo}>{item.tipo_servicio_label}</Text>
           <Text style={s.meta}>🏛️ {item.proyecto.entidad}</Text>

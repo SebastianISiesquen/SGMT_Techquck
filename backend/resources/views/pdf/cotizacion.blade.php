@@ -12,18 +12,12 @@
     </style>
 </head>
 <body>
-<header>
-    <div class="empresa">{{ $empresa['empresa_nombre'] }}</div>
-    <div class="sub">RUC {{ $empresa['empresa_ruc'] }} · {{ $empresa['empresa_direccion'] }}{{ $empresa['empresa_telefono'] ? ' · '.$empresa['empresa_telefono'] : '' }}{{ $empresa['empresa_email'] ? ' · '.$empresa['empresa_email'] : '' }}</div>
-    <div class="titulo">
-        <h1>Cotización</h1>
-        <div class="sub">{{ $c->numero }} · {{ $c->fecha->format('d/m/Y') }}</div>
-    </div>
-</header>
-<footer>
-    <span>{{ $c->numero }} · Válida hasta el {{ $c->venceEl()->format('d/m/Y') }}</span>
-    <span class="pag" style="float: right;"></span>
-</footer>
+@include('pdf._cabecera', [
+    'titulo' => 'COTIZACIÓN',
+    'numero' => $c->numero,
+    'datos' => ['Fecha' => $c->fecha->format('d/m/Y'), 'Válida hasta' => $c->venceEl()->format('d/m/Y'), 'Moneda' => $c->moneda],
+    'pie' => "Cotización {$c->numero}",
+])
 
 <table class="kv">
     <tr><td class="k">Cliente</td><td><strong>{{ $c->entidad->nombre }}</strong>{{ $c->entidad->ruc ? ' · RUC '.$c->entidad->ruc : '' }}</td></tr>

@@ -49,6 +49,11 @@ class ArchivoController extends Controller
         $categoria = CategoriaArchivo::from($request->categoria)->label();
         Auditor::log('adjuntar', $tipo.'s', "Adjuntó $cantidad archivo(s) [$categoria] a $tipo #$id", $padre);
 
+        // El acta firmada por el cliente deja la hoja de servicio conforme
+        if ($padre instanceof HojaServicio && $request->categoria === 'acta_conformidad') {
+            app(\App\Services\HojaServicioService::class)->registrarActa($padre);
+        }
+
         $incidencia = $padre instanceof Atencion ? $padre->incidencia : ($padre instanceof Incidencia ? $padre : null);
         if ($incidencia) {
             $incidencias->historial($incidencia, 'evidencia', null, null, "$cantidad archivo(s): $categoria");
@@ -83,7 +88,14 @@ class ArchivoController extends Controller
     {
         Gate::authorize('delete', $archivo);
 
+        $padre = $archivo->archivable;
         ArchivoService::eliminar($archivo);
+
+        // Si se quitó la única acta de una hoja, vuelve a quedar pendiente de acta
+        if ($padre instanceof HojaServicio && $archivo->categoria->value === 'acta_conformidad'
+            && $padre->estado->value === 'conforme' && ! $padre->archivos()->where('categoria', 'acta_conformidad')->exists()) {
+            $padre->update(['estado' => 'registrada', 'conforme' => false, 'fecha_firma' => null]);
+        }
         Auditor::log('eliminar', 'archivos', "Eliminó el archivo {$archivo->nombre_original}", $archivo->archivable);
 
         return back()->with('ok', 'Archivo eliminado.');

@@ -1,165 +1,240 @@
+@php
+    $p = $hoja->proyecto;
+    $lugar = $p->lugarDeServicio();
+    $inc = $hoja->incidencia;
+    $hora = fn ($v) => $v ? \App\Support\Hora::doce($v) : '—';
+    $correctivo = in_array($hoja->tipo_servicio->value, ['correctivo', 'otro']) || $inc;
+    $marcaVerif = ['ok' => ['✔', 'ok'], 'no' => ['✘', 'mal'], 'na' => ['N/A', 'muted']];
+    $claseChk = ['ok' => 'ok', 'observado' => 'obs', 'falla' => 'mal', 'na' => 'muted'];
+    $resultadoColor = ['resuelto' => 'e-verde', 'parcial' => 'e-ambar', 'pendiente_repuesto' => 'e-azul', 'no_procede' => 'e-rojo'];
+    $n = 0;
+    $recomendacionesGenerales = \App\Support\Ajustes::catalogo('recomendaciones_generales');
+@endphp
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="utf-8">
     <title>{{ $hoja->numero }}</title>
     @include('pdf._estilos')
-    <style>
-        body { font-size: 9px; }
-        .cuadro td { border: 1px solid #cbd5e1; padding: 4px 6px; }
-        .cuadro td.k { background: #f1f5f9; color: #334155; font-weight: bold; width: 18%; }
-        .marca { display: inline-block; width: 9px; height: 9px; border: 1px solid #334155; margin-right: 3px; text-align: center; line-height: 9px; font-size: 8px; }
-        .firmas tr td { background: none !important; }
-        .sello { position: fixed; top: 120px; right: 10px; font-size: 40px; color: rgba(220, 38, 38, .18); transform: rotate(-20deg); }
-    </style>
 </head>
 <body>
-<header>
-    <div class="empresa">{{ $empresa['empresa_nombre'] }}</div>
-    <div class="sub">RUC {{ $empresa['empresa_ruc'] }} · {{ $empresa['empresa_direccion'] }}</div>
-    <div class="titulo">
-        <h1>HOJA DE SERVICIO EN CAMPO</h1>
-        <div class="sub" style="font-size: 11px; color: #0b1d3a;"><strong>N° {{ $hoja->numero }}</strong></div>
-    </div>
-</header>
-<footer>
-    <span>{{ $hoja->numero }} · {{ $hoja->estado->label() }}{{ $hoja->fecha_firma ? ' el '.$hoja->fecha_firma->format('d/m/Y H:i') : '' }}</span>
-    <span class="pag" style="float: right;"></span>
-</footer>
+@include('pdf._cabecera', [
+    'titulo' => 'HOJA DE SERVICIO',
+    'numero' => $hoja->numero,
+    'datos' => array_filter([
+        'Incidencia / OT' => $inc?->codigo ?? ($hoja->mantenimiento ? $hoja->mantenimiento->etiqueta() : '—'),
+        'Fecha' => $hoja->fecha->format('d/m/Y'),
+        'Llegada / salida' => $hora($hoja->hora_llegada).' – '.$hora($hoja->hora_salida),
+        'Tipo de servicio' => $hoja->tipo_servicio->label(),
+    ]),
+    'pie' => "Hoja de servicio {$hoja->numero} · {$hoja->estado->label()}",
+])
 
-@if ($hoja->estado->value === 'anulada')<div class="sello">ANULADA</div>@endif
+@if ($hoja->estado->value === 'anulada')<div class="sello-anulado">ANULADA</div>@endif
 
-<table class="cuadro">
-    <tr><td class="k">Cliente</td><td colspan="3">{{ $hoja->proyecto->entidad->nombre }}{{ $hoja->proyecto->orden_compra ? ' · OC '.$hoja->proyecto->orden_compra : '' }}</td></tr>
-    @if ($hoja->proyecto->clienteFinal)
-        <tr><td class="k">Cliente final</td><td colspan="3">{{ $hoja->proyecto->clienteFinal->nombre }} (lugar del servicio)</td></tr>
+{{-- Datos del cliente y del servicio --}}
+<table class="datos">
+    <tr>
+        <td class="k">Cliente</td><td>{{ $p->entidad->nombre }}</td>
+        <td class="k">RUC</td><td style="width: 18%;">{{ $p->entidad->ruc ?? '—' }}</td>
+    </tr>
+    @if ($p->clienteFinal)
+        <tr><td class="k">Cliente final</td><td colspan="3">{{ $p->clienteFinal->nombre }} <span class="muted">(lugar donde se prestó el servicio)</span></td></tr>
     @endif
-    <tr><td class="k">Proyecto / servicio</td><td colspan="3">{{ $hoja->proyecto->codigo }} · {{ $hoja->proyecto->nombre }}{{ $hoja->mantenimiento ? ' · '.$hoja->mantenimiento->etiqueta() : '' }}</td></tr>
     <tr>
-        <td class="k">Garantía</td><td>{{ $hoja->garantia?->etiqueta() ?? '—' }}</td>
-        <td class="k">Incidencia</td><td>{{ $hoja->incidencia?->codigo ?? '—' }}</td>
+        <td class="k">Dirección / lugar</td><td>{{ $inc?->ubicacion_detalle ?: ($p->ubicacion ?: $lugar->direccion) ?: '—' }}</td>
+        <td class="k">Contacto</td><td>{{ $inc?->reportado_por ?: $lugar->contacto_nombre ?: '—' }}</td>
     </tr>
     <tr>
-        <td class="k">Fecha</td><td>{{ $hoja->fecha->format('d/m/Y') }}</td>
-        <td class="k">Horario</td><td>Llegada {{ substr($hoja->hora_llegada, 0, 5) }} · Salida {{ $hoja->hora_salida ? substr($hoja->hora_salida, 0, 5) : '—' }}{{ $hoja->duracion() ? ' ('.$hoja->duracion().')' : '' }}</td>
+        <td class="k">Teléfono / correo</td><td>{{ collect([$lugar->contacto_telefono, $lugar->contacto_email])->filter()->implode(' · ') ?: '—' }}</td>
+        <td class="k">Técnico</td><td>{{ $hoja->tecnico?->name }}</td>
     </tr>
     <tr>
-        <td class="k">Tipo de servicio</td>
-        <td colspan="3">
-            @foreach (\App\Enums\TipoServicio::cases() as $t)
-                <span style="margin-right: 10px;"><span class="marca">{{ $hoja->tipo_servicio === $t ? 'X' : '' }}</span>{{ $t->label() }}</span>
-            @endforeach
-        </td>
+        <td class="k">Proyecto / servicio</td><td>{{ $p->codigo }} · {{ $p->nombre }}</td>
+        <td class="k">Orden de compra</td><td>{{ $p->orden_compra ?? '—' }}</td>
     </tr>
-</table>
-
-<h2>Equipos intervenidos</h2>
-<table>
-    <thead><tr><th>Código</th><th>Equipo</th><th>Marca</th><th>Modelo</th><th>N° serie</th><th>Ubicación</th><th>Acción</th><th>Estado final</th></tr></thead>
-    <tbody>
-    @forelse ($hoja->equipos as $i => $e)
+    @if ($hoja->garantia || $inc)
         <tr>
-            <td>{{ $e->inventario?->codigo ?? $i + 1 }}</td><td>{{ $e->equipo }}</td><td>{{ $e->marca }}</td><td>{{ $e->modelo }}</td><td>{{ $e->serie }}</td>
-            <td>{{ $e->ubicacion }}</td><td>{{ $e->accionLabel() }}</td><td>{{ $e->estadoLabel() }}{{ $e->observacion ? ' — '.$e->observacion : '' }}</td>
+            <td class="k">Garantía</td><td>{{ $hoja->garantia ? $hoja->garantia->etiqueta().' · vence '.$hoja->garantia->fecha_vencimiento->format('d/m/Y') : '—' }}</td>
+            <td class="k">Cobertura</td><td>{{ $inc?->coberturaLabel() ?? '—' }}</td>
         </tr>
-    @empty
-        <tr><td colspan="8" style="color: #6b7280;">No se registraron equipos.</td></tr>
-    @endforelse
-    </tbody>
+    @endif
 </table>
 
+{{-- Verificaciones previas de seguridad --}}
+@if ($hoja->verificaciones)
+    <div class="seccion evitar-corte">
+        <div class="seccion-titulo"><span class="n">{{ ++$n }}</span>EVALUACIÓN PRELIMINAR · VERIFICACIONES PREVIAS EN SITIO</div>
+        <div class="seccion-cuerpo">
+            <table class="sin-borde">
+                @foreach (collect($hoja->verificaciones)->chunk((int) ceil(count($hoja->verificaciones) / 2)) as $col)
+                    @if ($loop->first)<tr>@endif
+                    <td style="width: 50%; vertical-align: top; padding: 0 6px 0 0;">
+                        @foreach ($col as $v)
+                            @php([$simbolo, $clase] = $marcaVerif[$v['resultado']] ?? ['—', 'muted'])
+                            <div style="padding: 1.5px 0;"><span class="{{ $clase }}" style="display: inline-block; width: 22px;">{{ $simbolo }}</span>{{ $v['item'] }}</div>
+                        @endforeach
+                    </td>
+                    @if ($loop->last)</tr>@endif
+                @endforeach
+            </table>
+        </div>
+    </div>
+@endif
+
+{{-- Motivo del servicio y diagnóstico --}}
+@if ($correctivo || $hoja->mantenimiento)
+    <div class="seccion evitar-corte">
+        <div class="seccion-titulo"><span class="n">{{ ++$n }}</span>{{ $inc ? 'FALLA REPORTADA Y DIAGNÓSTICO' : 'MOTIVO DEL SERVICIO' }}</div>
+        <div class="seccion-cuerpo">
+            <table class="kv">
+                @if ($inc)
+                    <tr><td class="k">Falla reportada</td><td><strong>{{ $inc->titulo }}</strong> · {{ $inc->fecha_reporte->format('d/m/Y h:i A') }}{{ $inc->canal ? ' · '.$inc->canal : '' }}</td></tr>
+                    <tr><td class="k">Descripción</td><td class="pre">{{ $inc->descripcion }}</td></tr>
+                @endif
+                @if ($hoja->mantenimiento)
+                    <tr><td class="k">Visita programada</td><td>{{ $hoja->mantenimiento->etiqueta() }} · {{ $hoja->mantenimiento->plan->nombre }}</td></tr>
+                    @if ($hoja->mantenimiento->plan->alcance)<tr><td class="k">Alcance</td><td class="pre">{{ $hoja->mantenimiento->plan->alcance }}</td></tr>@endif
+                @endif
+                @if ($hoja->diagnostico)
+                    <tr><td class="k">Diagnóstico técnico</td><td class="pre">{{ $hoja->diagnostico }}</td></tr>
+                @endif
+            </table>
+        </div>
+    </div>
+@endif
+
+{{-- Información técnica de los equipos --}}
+<div class="seccion">
+    <div class="seccion-titulo"><span class="n">{{ ++$n }}</span>INFORMACIÓN TÉCNICA DE LOS EQUIPOS INTERVENIDOS</div>
+    <table>
+        <thead><tr><th style="width: 9%;">Código</th><th>Equipo</th><th>Marca / modelo</th><th style="width: 14%;">N° de serie</th><th>Ubicación</th><th style="width: 12%;">Acción</th><th style="width: 15%;">Estado final</th></tr></thead>
+        <tbody>
+        @forelse ($hoja->equipos as $i => $e)
+            <tr>
+                <td>{{ $e->inventario?->codigo ?? '—' }}</td>
+                <td><strong>{{ $e->equipo }}</strong></td>
+                <td>{{ trim($e->marca.' '.$e->modelo) ?: '—' }}</td>
+                <td>{{ $e->serie ?? '—' }}</td>
+                <td>{{ $e->ubicacion ?? '—' }}</td>
+                <td>{{ $e->accionLabel() }}</td>
+                <td><span class="{{ ['operativo' => 'ok', 'observado' => 'obs', 'inoperativo' => 'mal'][$e->estado_final] ?? '' }}">{{ $e->estadoLabel() }}</span>
+                    @if ($e->observacion)<br><span class="chico muted">{{ $e->observacion }}</span>@endif</td>
+            </tr>
+        @empty
+            <tr><td colspan="7" class="muted">No se registraron equipos.</td></tr>
+        @endforelse
+        </tbody>
+    </table>
+</div>
+
+{{-- Ejecución: checklist de mantenimiento por equipo --}}
 @php($conChecklist = $hoja->equipos->filter(fn ($e) => ! empty($e->checklist)))
 @if ($conChecklist->isNotEmpty())
-    <h2>Checklist de mantenimiento</h2>
-    @foreach ($conChecklist as $e)
-        <p style="margin: 4px 0 2px;"><strong>{{ $e->inventario?->codigo ?? '' }} {{ $e->equipo }}</strong>{{ $e->serie ? ' · S/N '.$e->serie : '' }}</p>
+    <div class="seccion">
+        <div class="seccion-titulo"><span class="n">{{ ++$n }}</span>EJECUCIÓN DEL SERVICIO · PUNTOS DE CONTROL</div>
+        @foreach ($conChecklist as $e)
+            <table class="evitar-corte" style="margin-top: {{ $loop->first ? 0 : 5 }}px;">
+                <thead><tr><th colspan="3">{{ $e->inventario?->codigo ? $e->inventario->codigo.' · ' : '' }}{{ $e->equipo }}{{ $e->serie ? ' · S/N '.$e->serie : '' }}</th></tr></thead>
+                <tbody>
+                @foreach ($e->checklist as $pt)
+                    <tr>
+                        <td style="width: 58%;">{{ $pt['item'] }}</td>
+                        <td style="width: 12%;" class="centro"><span class="{{ $claseChk[$pt['resultado']] ?? '' }}">{{ \App\Models\Checklist::RESULTADOS[$pt['resultado']] ?? $pt['resultado'] }}</span></td>
+                        <td class="chico">{{ $pt['nota'] ?? '' }}</td>
+                    </tr>
+                @endforeach
+                </tbody>
+            </table>
+        @endforeach
+    </div>
+@endif
+
+{{-- Trabajo realizado --}}
+<div class="seccion evitar-corte">
+    <div class="seccion-titulo"><span class="n">{{ ++$n }}</span>TRABAJO REALIZADO</div>
+    <div class="seccion-cuerpo pre">{{ $hoja->trabajo_realizado }}</div>
+</div>
+
+{{-- Mediciones --}}
+@if ($hoja->mediciones)
+    <div class="seccion evitar-corte">
+        <div class="seccion-titulo"><span class="n">{{ ++$n }}</span>MEDICIONES</div>
         <table>
+            @foreach (collect($hoja->mediciones)->chunk(3) as $fila)
+                <tr>
+                    @foreach ($fila as $m)
+                        <td style="width: 20%; background: #f1f5f9; font-weight: bold;">{{ $m['parametro'] }}</td>
+                        <td style="width: 13.3%;" class="num"><strong>{{ $m['valor'] }}</strong> {{ $m['unidad'] }}</td>
+                    @endforeach
+                    @for ($k = $fila->count(); $k < 3; $k++)<td></td><td></td>@endfor
+                </tr>
+            @endforeach
+        </table>
+    </div>
+@endif
+
+{{-- Materiales --}}
+@if ($hoja->materiales->isNotEmpty())
+    <div class="seccion evitar-corte">
+        <div class="seccion-titulo"><span class="n">{{ ++$n }}</span>MATERIALES Y REPUESTOS UTILIZADOS</div>
+        <table>
+            <thead><tr><th style="width: 5%;" class="centro">#</th><th>Descripción</th><th style="width: 12%;" class="num">Cantidad</th><th style="width: 12%;">Unidad</th></tr></thead>
             <tbody>
-            @foreach ($e->checklist as $p)
-                <tr><td style="width: 55%;">{{ $p['item'] }}</td><td style="width: 15%;"><strong>{{ \App\Models\Checklist::RESULTADOS[$p['resultado']] ?? $p['resultado'] }}</strong></td><td>{{ $p['nota'] ?? '' }}</td></tr>
+            @foreach ($hoja->materiales as $k => $m)
+                <tr><td class="centro">{{ $k + 1 }}</td><td>{{ $m->descripcion }}</td><td class="num">{{ rtrim(rtrim(number_format($m->cantidad, 2), '0'), '.') }}</td><td>{{ $m->unidad }}</td></tr>
             @endforeach
             </tbody>
         </table>
-    @endforeach
+    </div>
 @endif
 
-@if ($hoja->diagnostico)
-    <h2>Diagnóstico</h2>
-    <div class="caja pre">{{ $hoja->diagnostico }}</div>
+{{-- Resultado, pendientes y recomendaciones --}}
+<div class="seccion evitar-corte">
+    <div class="seccion-titulo"><span class="n">{{ ++$n }}</span>RESULTADO Y RECOMENDACIONES</div>
+    <div class="seccion-cuerpo">
+        <table class="kv">
+            @if ($hoja->resultado)
+                <tr><td class="k">Resultado de la visita</td><td><span class="etiqueta {{ $resultadoColor[$hoja->resultado] ?? 'e-gris' }}">{{ $hoja->resultadoLabel() }}</span></td></tr>
+            @endif
+            @if ($hoja->requiereVisita())
+                <tr><td class="k">Queda pendiente</td><td class="pre">{{ $hoja->pendientes }}</td></tr>
+                <tr><td class="k">Próxima visita</td><td><strong>{{ $hoja->proxima_visita?->format('d/m/Y') }}</strong></td></tr>
+            @endif
+            @if ($hoja->observaciones)<tr><td class="k">Observaciones</td><td class="pre">{{ $hoja->observaciones }}</td></tr>@endif
+            @if ($hoja->recomendaciones)<tr><td class="k">Recomendaciones</td><td class="pre">{{ $hoja->recomendaciones }}</td></tr>@endif
+        </table>
+        @if ($recomendacionesGenerales)
+            <div style="margin-top: 5px; padding-top: 4px; border-top: 1px dashed #cbd5e1;" class="chico muted">
+                @foreach ($recomendacionesGenerales as $r)<div>• {{ $r }}</div>@endforeach
+            </div>
+        @endif
+    </div>
+</div>
+
+{{-- Visitas anteriores de la misma incidencia --}}
+@if ($visitasPrevias->isNotEmpty())
+    <div class="seccion evitar-corte">
+        <div class="seccion-titulo"><span class="n">{{ ++$n }}</span>VISITAS ANTERIORES DE ESTA INCIDENCIA</div>
+        <table>
+            <thead><tr><th style="width: 13%;">Hoja</th><th style="width: 10%;">Fecha</th><th>Trabajo realizado</th><th style="width: 22%;">Resultado</th></tr></thead>
+            <tbody>
+            @foreach ($visitasPrevias as $v)
+                <tr><td>{{ $v->numero }}</td><td>{{ $v->fecha->format('d/m/Y') }}</td><td>{{ \Illuminate\Support\Str::limit($v->trabajo_realizado, 180) }}</td>
+                    <td>{{ $v->resultadoLabel() ?? '—' }}{{ $v->pendientes ? ' · Pendiente: '.\Illuminate\Support\Str::limit($v->pendientes, 60) : '' }}</td></tr>
+            @endforeach
+            </tbody>
+        </table>
+    </div>
 @endif
 
-<h2>Trabajo realizado</h2>
-<div class="caja pre">{{ $hoja->trabajo_realizado }}</div>
-@if ($hoja->resultado)<p><strong>Resultado:</strong> {{ $hoja->resultadoLabel() }}</p>@endif
-
-@if ($hoja->materiales->isNotEmpty())
-    <h2>Materiales y repuestos utilizados</h2>
-    <table>
-        <thead><tr><th style="width: 12%;">Cantidad</th><th style="width: 12%;">Unidad</th><th>Descripción</th></tr></thead>
-        <tbody>
-        @foreach ($hoja->materiales as $m)
-            <tr><td class="num">{{ rtrim(rtrim(number_format($m->cantidad, 2), '0'), '.') }}</td><td>{{ $m->unidad }}</td><td>{{ $m->descripcion }}</td></tr>
-        @endforeach
-        </tbody>
-    </table>
-@endif
-
-@if ($hoja->observaciones || $hoja->recomendaciones)
-    <table style="margin-top: 10px;">
-        <tr>
-            <td style="width: 50%; border: none; padding: 0 6px 0 0; vertical-align: top;">
-                <h2 style="margin-top: 0;">Observaciones</h2><div class="caja pre">{{ $hoja->observaciones ?: '—' }}</div>
-            </td>
-            <td style="width: 50%; border: none; padding: 0 0 0 6px; vertical-align: top;">
-                <h2 style="margin-top: 0;">Recomendaciones</h2><div class="caja pre">{{ $hoja->recomendaciones ?: '—' }}</div>
-            </td>
-        </tr>
-    </table>
-@endif
-
+{{-- Registro fotográfico --}}
 @if ($fotos->isNotEmpty())
-    <h2>Registro fotográfico</h2>
-    <table>
-        @foreach ($fotos->chunk(3) as $fila)
-            <tr>
-                @foreach ($fila as $f)
-                    <td style="width: 33%; border: none; text-align: center; padding: 3px;">
-                        <img src="{{ $f['src'] }}" style="width: 100%; max-height: 150px; border: 1px solid #e5e7eb;">
-                        <div style="font-size: 7.5px; color: #6b7280;">{{ $f['nombre'] }}</div>
-                    </td>
-                @endforeach
-            </tr>
-        @endforeach
-    </table>
+    <div class="seccion {{ $fotos->count() > 2 ? 'salto' : '' }}">
+        <div class="seccion-titulo"><span class="n">{{ ++$n }}</span>REGISTRO FOTOGRÁFICO</div>
+        <div style="height: 4px;"></div>
+        @include('pdf._fotos', ['fotos' => $fotos])
+    </div>
 @endif
-
-<h2>Conformidad</h2>
-<p style="margin: 0 0 6px;">
-    <span class="marca">{{ $hoja->estaFirmada() && $hoja->conforme ? 'X' : '' }}</span> El cliente da su conformidad al servicio realizado.
-    &nbsp;&nbsp;
-    <span class="marca">{{ $hoja->estaFirmada() && ! $hoja->conforme ? 'X' : '' }}</span> Recibe con observaciones.
-</p>
-
-<table class="firmas" style="margin-top: 8px; page-break-inside: avoid;">
-    <tr>
-        <td style="width: 46%; border: none; text-align: center; vertical-align: bottom; height: 90px;">
-            @if ($firmaTecnico)<img src="{{ $firmaTecnico }}" style="height: 70px;">@endif
-        </td>
-        <td style="width: 8%; border: none;"></td>
-        <td style="width: 46%; border: none; text-align: center; vertical-align: bottom; height: 90px;">
-            @if ($firmaReceptor)<img src="{{ $firmaReceptor }}" style="height: 70px;">@endif
-        </td>
-    </tr>
-    <tr>
-        <td style="border: none; border-top: 1px solid #1f2937; text-align: center; padding-top: 4px;">
-            <strong>{{ $hoja->tecnico?->name }}</strong><br>Técnico · {{ $empresa['empresa_nombre'] }}
-        </td>
-        <td style="border: none;"></td>
-        <td style="border: none; border-top: 1px solid #1f2937; text-align: center; padding-top: 4px;">
-            <strong>{{ $hoja->receptor_nombre ?? '________________________' }}</strong><br>
-            {{ $hoja->receptor_cargo ?? 'Responsable del cliente' }}{{ $hoja->receptor_dni ? ' · DNI '.$hoja->receptor_dni : '' }}
-        </td>
-    </tr>
-</table>
 </body>
 </html>

@@ -12,6 +12,7 @@ use App\Http\Controllers\CotizacionController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EntidadController;
 use App\Http\Controllers\EquipoController;
+use App\Http\Controllers\EquipoPublicoController;
 use App\Http\Controllers\GarantiaController;
 use App\Http\Controllers\HojaServicioController;
 use App\Http\Controllers\IncidenciaController;
@@ -24,6 +25,10 @@ use App\Http\Controllers\PlanMantenimientoController;
 use App\Http\Controllers\ProyectoController;
 use App\Http\Controllers\ReporteController;
 use Illuminate\Support\Facades\Route;
+
+// Ficha pública del equipo: la abre el QR del sticker desde cualquier celular, sin iniciar sesión
+Route::get('e/{token}', [EquipoPublicoController::class, 'show'])->name('equipos.publico')
+    ->where('token', '[a-z0-9]{10,32}')->middleware('throttle:60,1');
 
 // PDF de la hoja de servicio con enlace firmado temporal (para abrirlo desde la app móvil)
 Route::get('hojas-servicio/{hoja}/pdf-publico', [HojaServicioController::class, 'pdfPublico'])
@@ -69,6 +74,7 @@ Route::middleware(['auth', 'activo'])->group(function () {
         Route::put('proyectos/{proyecto}', [ProyectoController::class, 'update'])->name('proyectos.update');
         Route::delete('proyectos/{proyecto}', [ProyectoController::class, 'destroy'])->name('proyectos.destroy');
         Route::post('proyectos/{proyecto}/equipos', [ProyectoController::class, 'agregarEquipos'])->name('proyectos.equipos.store');
+        Route::put('proyectos/{proyecto}/equipos', [ProyectoController::class, 'actualizarEquipos'])->name('proyectos.equipos.update');
     });
     Route::middleware('can:proyectos.ver')->group(function () {
         Route::get('proyectos', [ProyectoController::class, 'index'])->name('proyectos.index');
@@ -175,6 +181,7 @@ Route::middleware(['auth', 'activo'])->group(function () {
         Route::get('incidencias/{incidencia}/edit', [IncidenciaController::class, 'edit'])->name('incidencias.edit');
         Route::put('incidencias/{incidencia}', [IncidenciaController::class, 'update'])->name('incidencias.update');
     });
+    Route::post('incidencias/{incidencia}/reprogramar', [IncidenciaController::class, 'reprogramar'])->name('incidencias.reprogramar')->middleware('can:incidencias.asignar');
     Route::post('incidencias/{incidencia}/asignar', [IncidenciaController::class, 'asignar'])->name('incidencias.asignar')->middleware('can:incidencias.asignar');
     Route::middleware('can:incidencias.cerrar')->group(function () {
         Route::post('incidencias/{incidencia}/cerrar', [IncidenciaController::class, 'cerrar'])->name('incidencias.cerrar');
@@ -202,7 +209,6 @@ Route::middleware(['auth', 'activo'])->group(function () {
     Route::get('hojas-servicio/{hoja}', [HojaServicioController::class, 'show'])->name('hojas.show');
     Route::get('hojas-servicio/{hoja}/edit', [HojaServicioController::class, 'edit'])->name('hojas.edit');
     Route::put('hojas-servicio/{hoja}', [HojaServicioController::class, 'update'])->name('hojas.update');
-    Route::post('hojas-servicio/{hoja}/firmar', [HojaServicioController::class, 'firmar'])->name('hojas.firmar');
     Route::post('hojas-servicio/{hoja}/anular', [HojaServicioController::class, 'anular'])->name('hojas.anular');
     Route::get('hojas-servicio/{hoja}/pdf', [HojaServicioController::class, 'pdf'])->name('hojas.pdf');
 
@@ -233,6 +239,7 @@ Route::middleware(['auth', 'activo'])->group(function () {
         Route::middleware('can:configuracion.gestionar')->group(function () {
             Route::get('configuracion', [ConfiguracionController::class, 'edit'])->name('configuracion.edit');
             Route::put('configuracion', [ConfiguracionController::class, 'update'])->name('configuracion.update');
+            Route::post('configuracion/correo-prueba', [ConfiguracionController::class, 'probarCorreo'])->name('configuracion.correo-prueba');
         });
     });
 });

@@ -131,6 +131,26 @@ class IncidenciaController extends Controller
         return back()->with('ok', 'Incidencia asignada. Se notificó al técnico.');
     }
 
+    /** El supervisor fija o cambia la fecha de la próxima visita (p. ej. el cliente pidió otro día). */
+    public function reprogramar(Request $request, Incidencia $incidencia)
+    {
+        abort_unless($incidencia->estaAbierta(), 422, 'La incidencia ya no está abierta.');
+
+        $datos = $request->validate([
+            'proxima_visita' => ['required', 'date', 'after_or_equal:today'],
+            'motivo_reprogramacion' => ['nullable', 'string', 'max:255'],
+        ], ['proxima_visita.after_or_equal' => 'La fecha no puede ser pasada.']);
+
+        $incidencia->update($datos);
+        $motivo = $datos['motivo_reprogramacion'] ?? null;
+        $detalle = "Próxima visita el {$incidencia->proxima_visita->format('d/m/Y')}".($motivo ? ": $motivo" : '');
+        $this->servicio->historial($incidencia, 'reprogramacion', null, null, $detalle);
+        Auditor::log('editar', 'incidencias', "{$incidencia->codigo}: $detalle", $incidencia);
+        $incidencia->tecnico?->notify(new \App\Notifications\VisitaReprogramada($incidencia));
+
+        return back()->with('ok', 'Visita programada. Se avisó al técnico.');
+    }
+
     public function cerrar(Request $request, Incidencia $incidencia)
     {
         $request->validate(['comentario' => ['nullable', 'string', 'max:500']]);
@@ -160,13 +180,12 @@ class IncidenciaController extends Controller
     {
         Gate::authorize('view', $incidencia);
 
-        $incidencia->load(['proyecto.entidad', 'proyecto.clienteFinal', 'garantia', 'equipo', 'tecnico', 'atenciones.tecnico', 'atenciones.archivos', 'archivos', 'historial.usuario']);
+        $incidencia->load(['proyecto.entidad', 'proyecto.clienteFinal', 'garantia', 'equipo', 'tecnico', 'atenciones.tecnico', 'atenciones.archivos',
+            'archivos', 'historial.usuario', 'hojasServicio' => fn ($q) => $q->with(['tecnico', 'equipos', 'materiales'])]);
 
-        $fotos = $incidencia->todasLasEvidencias()
-            ->filter(fn ($a) => $a->esImagen())
-            ->take(12)
-            ->map(fn ($a) => ['src' => ArchivoService::contenidoBase64($a), 'nombre' => $a->descripcion ?: $a->nombre_original])
-            ->filter(fn ($f) => $f['src']);
+        // Fotos de la incidencia, sus atenciones y sus hojas (sin las actas), encuadradas para el PDF
+        $fotos = \App\Services\Pdf\Imagenes::paraPdf($incidencia->todasLasEvidencias()
+            ->filter(fn ($a) => $a->esImagen() && $a->categoria->value !== 'acta_conformidad')->take(12));
 
         return Pdf::loadView('pdf.informe-incidencia', [
             'incidencia' => $incidencia,

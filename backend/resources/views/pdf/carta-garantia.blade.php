@@ -21,18 +21,12 @@
     </style>
 </head>
 <body>
-<header>
-    <div class="empresa">{{ $empresa['empresa_nombre'] }}</div>
-    <div class="sub">RUC {{ $empresa['empresa_ruc'] }} · {{ $empresa['empresa_direccion'] }}{{ $empresa['empresa_telefono'] ? ' · '.$empresa['empresa_telefono'] : '' }}{{ $empresa['empresa_email'] ? ' · '.$empresa['empresa_email'] : '' }}</div>
-    <div class="titulo">
-        <h1>Carta de garantía</h1>
-        <div class="sub">N° {{ $g->codigo }}</div>
-    </div>
-</header>
-<footer>
-    <span>Carta de garantía {{ $g->codigo }} · {{ $empresa['empresa_nombre'] }}</span>
-    <span class="pag" style="float: right;"></span>
-</footer>
+@include('pdf._cabecera', [
+    'titulo' => 'CARTA DE GARANTÍA',
+    'numero' => $g->codigo,
+    'datos' => ['Fecha' => now()->format('d/m/Y'), 'Vigencia' => $g->fecha_inicio->format('d/m/Y').' – '.$g->fecha_vencimiento->format('d/m/Y')],
+    'pie' => "Carta de garantía {$g->codigo}",
+])
 
 <p class="derecha">Chiclayo, {{ now()->translatedFormat('d \d\e F \d\e Y') }}</p>
 

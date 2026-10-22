@@ -89,6 +89,7 @@ export default function Bandeja() {
             <Text style={s.titulo}>{item.titulo}</Text>
             <Text style={s.meta}>🏛️ {item.proyecto.entidad}</Text>
             {item.ubicacion_detalle ? <Text style={s.meta}>📍 {item.ubicacion_detalle}</Text> : null}
+            {item.proxima_visita ? <Text style={[s.meta, { color: '#1d4ed8', fontWeight: '700' }]}>🗓️ Próxima visita: {fecha(item.proxima_visita, false)}</Text> : null}
             <View style={s.itemBottom}>
               <Badge texto={item.estado_label} tono={colorEstado[item.estado]} />
               <Text style={[s.meta, item.sla_vencido && { color: color.danger, fontWeight: '700' }]}>

@@ -121,8 +121,10 @@ export const api = {
   hojas: () => request<{ data: HojaServicio[] }>('/hojas').then((r) => r.data),
   hoja: (id: number | string) => request<{ data: HojaServicio }>(`/hojas/${id}`).then((r) => r.data),
   crearHoja: (form: FormData) => request<{ data: HojaServicio }>('/hojas', { method: 'POST', body: form }).then((r) => r.data),
-  firmarHoja: (id: number | string, form: FormData) =>
-    request<{ data: HojaServicio }>(`/hojas/${id}/firmar`, { method: 'POST', body: form }).then((r) => r.data),
+  /** Acta de conformidad firmada por el cliente (foto o PDF): la hoja queda conforme. */
+  subirActa: (id: number | string, form: FormData) =>
+    request<{ data: HojaServicio }>(`/hojas/${id}/acta`, { method: 'POST', body: form }).then((r) => r.data),
+  verificaciones: () => request<string[]>('/verificaciones'),
   leerNotificaciones: () => request('/notificaciones/leer', { method: 'POST' }),
   buscarEquipos: (texto: string) => request<{ data: Equipo[] }>(`/equipos?buscar=${encodeURIComponent(texto)}`).then((r) => r.data),
   equiposDeProyecto: (proyectoId: number) => request<{ data: Equipo[] }>(`/equipos?proyecto_id=${proyectoId}`).then((r) => r.data),

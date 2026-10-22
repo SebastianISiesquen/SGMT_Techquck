@@ -22,3 +22,8 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Respaldos de la base de datos: contienen datos de clientes y usuarios, nunca se suben
+/storage/respaldos/
+*.sql
+*.sql.gz

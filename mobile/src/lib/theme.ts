@@ -35,8 +35,7 @@ export const colorEstado: Record<string, string> = {
   parcial: 'amber',
   pendiente_repuesto: 'blue',
   no_procede: 'red',
-  pendiente_firma: 'amber',
-  firmada: 'green',
+  conforme: 'green',
   // Equipos
   operativo: 'green',
   observado: 'amber',

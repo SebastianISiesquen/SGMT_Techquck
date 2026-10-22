@@ -44,7 +44,14 @@ class EquipoApiController extends Controller
     {
         abort_unless($request->user()->can('equipos.ver'), 403);
 
-        $texto = strtoupper(trim(urldecode($codigo)));
+        $texto = trim(urldecode($codigo));
+
+        // QR de los stickers nuevos: https://…/e/{código aleatorio}
+        if (preg_match('#/e/([a-z0-9]{10,32})#i', $texto, $m) && ($porToken = Equipo::where('token_publico', strtolower($m[1]))->first())) {
+            return $this->show($request, $porToken);
+        }
+
+        $texto = strtoupper($texto);
         if (preg_match('/EQ-\d{6}/', $texto, $m)) {
             $texto = $m[0];
         }

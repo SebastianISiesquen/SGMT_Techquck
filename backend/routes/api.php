@@ -31,7 +31,7 @@ Route::middleware(['auth:sanctum', 'activo'])->group(function () {
     Route::get('hojas', [HojaServicioApiController::class, 'index']);
     Route::post('hojas', [HojaServicioApiController::class, 'store']);
     Route::get('hojas/{hoja}', [HojaServicioApiController::class, 'show']);
-    Route::post('hojas/{hoja}/firmar', [HojaServicioApiController::class, 'firmar']);
+    Route::post('hojas/{hoja}/acta', [HojaServicioApiController::class, 'subirActa']);
 
     Route::get('equipos', [EquipoApiController::class, 'index']);
     Route::get('equipos/codigo/{codigo}', [EquipoApiController::class, 'porCodigo'])->where('codigo', '.*');
@@ -39,4 +39,5 @@ Route::middleware(['auth:sanctum', 'activo'])->group(function () {
     Route::get('mantenimientos', [EquipoApiController::class, 'mantenimientos']);
     Route::get('almacen', [HojaServicioApiController::class, 'almacen']);
     Route::get('checklists', [HojaServicioApiController::class, 'checklists']);
+    Route::get('verificaciones', [HojaServicioApiController::class, 'verificaciones']);
 });

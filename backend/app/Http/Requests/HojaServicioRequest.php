@@ -31,6 +31,16 @@ class HojaServicioRequest extends FormRequest
             // Visita por una incidencia: la hoja registra la atención técnica (diagnóstico y resultado)
             'diagnostico' => ['required_with:incidencia_id', 'nullable', 'string', 'max:5000'],
             'resultado' => ['required_with:incidencia_id', 'nullable', Rule::enum(ResultadoAtencion::class)],
+            // Si no se terminó: qué falta y cuándo se vuelve
+            'pendientes' => ['nullable', 'string', 'max:2000', Rule::requiredIf(fn () => $this->requiereVisita())],
+            'proxima_visita' => ['nullable', 'date', 'after_or_equal:today', Rule::requiredIf(fn () => $this->requiereVisita())],
+            'verificaciones' => ['nullable', 'array', 'max:30'],
+            'verificaciones.*.item' => ['nullable', 'string', 'max:200'],
+            'verificaciones.*.resultado' => ['nullable', Rule::in(['ok', 'no', 'na'])],
+            'mediciones' => ['nullable', 'array', 'max:40'],
+            'mediciones.*.parametro' => ['nullable', 'string', 'max:80'],
+            'mediciones.*.valor' => ['nullable', 'string', 'max:40'],
+            'mediciones.*.unidad' => ['nullable', 'string', 'max:20'],
             'trabajo_realizado' => ['required', 'string', 'max:5000'],
             'observaciones' => ['nullable', 'string', 'max:3000'],
             'recomendaciones' => ['nullable', 'string', 'max:3000'],
@@ -60,14 +70,17 @@ class HojaServicioRequest extends FormRequest
 
             'fotos' => ['nullable', 'array', 'max:15'],
             'fotos.*' => ArchivoService::reglas(),
+            'fotos_descripcion' => ['nullable', 'array'],
+            'fotos_descripcion.*' => ['nullable', 'string', 'max:120'],
 
-            // Firma (opcional al crear; puede firmarse después)
-            'receptor_nombre' => ['required_with:firma_receptor', 'nullable', 'string', 'max:255'],
+            // Acta de conformidad ya firmada por el cliente (foto o PDF); también se puede subir después
+            'actas' => ['nullable', 'array', 'max:5'],
+            'actas.*' => ArchivoService::reglas(),
+
+            // Quién recibe el servicio (su firma va en el acta impresa)
+            'receptor_nombre' => ['nullable', 'string', 'max:255'],
             'receptor_dni' => \App\Support\Reglas::documento(),
             'receptor_cargo' => ['nullable', 'string', 'max:255'],
-            'firma_receptor' => ['nullable', 'string', 'max:1500000'],
-            'firma_tecnico' => ['nullable', 'string', 'max:1500000'],
-            'conforme' => ['nullable', 'boolean'],
         ];
     }
 
@@ -79,7 +92,9 @@ class HojaServicioRequest extends FormRequest
             'proyecto_id.required_without' => 'Seleccione el proyecto atendido.',
             'diagnostico.required_with' => 'Indique el diagnóstico: qué encontró y cuál es la causa de la falla.',
             'resultado.required_with' => 'Indique el resultado de la atención.',
-            'receptor_nombre.required_with' => 'Indique el nombre de quien firma por la entidad.',
+            'pendientes.required' => 'Indique qué quedó pendiente para la próxima visita.',
+            'proxima_visita.required' => 'Indique la fecha de la próxima visita.',
+            'proxima_visita.after_or_equal' => 'La próxima visita no puede ser una fecha pasada.',
         ];
     }
 
@@ -93,6 +108,8 @@ class HojaServicioRequest extends FormRequest
             'equipos.*.accion' => 'acción sobre el equipo',
             'equipos.*.estado_final' => 'estado final del equipo',
             'fotos.*' => 'foto',
+            'actas.*' => 'acta de conformidad',
+            'proxima_visita' => 'próxima visita',
         ];
     }
 
@@ -100,14 +117,14 @@ class HojaServicioRequest extends FormRequest
     {
         return $this->safe()->only([
             'incidencia_id', 'proyecto_id', 'garantia_id', 'mantenimiento_id', 'tipo_servicio', 'fecha', 'hora_llegada', 'hora_salida',
-            'diagnostico', 'resultado', 'trabajo_realizado', 'observaciones', 'recomendaciones', 'latitud', 'longitud',
+            'diagnostico', 'resultado', 'pendientes', 'proxima_visita', 'trabajo_realizado', 'observaciones', 'recomendaciones',
+            'verificaciones', 'mediciones', 'receptor_nombre', 'receptor_dni', 'receptor_cargo', 'latitud', 'longitud',
         ]);
     }
 
-    public function firma(): ?array
+    /** El resultado indica que el trabajo no se terminó y hay que volver. */
+    public function requiereVisita(): bool
     {
-        return $this->filled('firma_receptor')
-            ? [...$this->safe()->only(['receptor_nombre', 'receptor_dni', 'receptor_cargo', 'firma_receptor', 'firma_tecnico']), 'conforme' => $this->boolean('conforme')]
-            : null;
+        return (bool) ResultadoAtencion::tryFrom((string) $this->input('resultado'))?->requiereVisita();
     }
 }

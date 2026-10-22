@@ -28,7 +28,7 @@ class Incidencia extends Model
 
     protected $fillable = [
         'codigo', 'proyecto_id', 'garantia_id', 'equipo_id', 'cobertura', 'titulo', 'descripcion', 'prioridad', 'estado',
-        'canal', 'reportado_por', 'ubicacion_detalle', 'fecha_reporte', 'fecha_limite',
+        'canal', 'reportado_por', 'ubicacion_detalle', 'fecha_reporte', 'fecha_limite', 'proxima_visita', 'motivo_reprogramacion',
         'tecnico_id', 'asignado_por', 'fecha_asignacion', 'fecha_resolucion', 'fecha_cierre',
         'cerrado_por', 'registrado_por',
     ];
@@ -40,6 +40,7 @@ class Incidencia extends Model
             'prioridad' => Prioridad::class,
             'fecha_reporte' => 'datetime',
             'fecha_limite' => 'datetime',
+            'proxima_visita' => 'date',
             'fecha_asignacion' => 'datetime',
             'fecha_resolucion' => 'datetime',
             'fecha_cierre' => 'datetime',
@@ -126,10 +127,10 @@ class Incidencia extends Model
             ->get();
     }
 
-    /** Acta escaneada adjunta, o una hoja de servicio firmada con conformidad de la entidad. */
+    /** Acta de conformidad firmada adjunta a la incidencia, a una atención o a una de sus hojas de servicio. */
     public function tieneActaConformidad(): bool
     {
-        return $this->hojasServicio()->where('estado', 'firmada')->where('conforme', true)->exists()
+        return $this->hojasServicio()->where('estado', 'conforme')->exists()
             || $this->todasLasEvidencias()->contains(fn ($a) => $a->categoria->value === 'acta_conformidad');
     }
 

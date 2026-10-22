@@ -116,7 +116,14 @@ class GarantiaController extends Controller
             return back()->withErrors(['general' => 'El cliente no tiene correos registrados o la garantía está configurada para no avisarle.']);
         }
 
-        $alertas->enviar($garantia, null, soloCliente: true);
+        if (! \App\Support\Correo::activo()) {
+            return back()->withErrors(['general' => 'El correo no está configurado: no se envió nada. Configure el servidor de correo en Configuración → Correo y use «Enviar correo de prueba».']);
+        }
+
+        $enviados = $alertas->enviar($garantia, null, soloCliente: true);
+        if (! $enviados) {
+            return back()->withErrors(['general' => 'No se pudo enviar el correo: '.$alertas->ultimoError]);
+        }
         Auditor::log('notificar', 'garantias', "Envió el aviso de vencimiento de {$garantia->codigo} a ".implode(', ', $correos), $garantia);
 
         return back()->with('ok', 'Aviso enviado a '.implode(', ', $correos).'.');

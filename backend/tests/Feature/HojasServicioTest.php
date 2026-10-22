@@ -23,9 +23,6 @@ class HojasServicioTest extends TestCase
     private Entidad $entidad;
     private Proyecto $proyecto;
 
-    /** Firma dibujada en la app: trazos en coordenadas del pad. */
-    private string $firmaTrazos = '{"w":300,"h":120,"trazos":[[[10,60],[50,20],[90,90],[130,30],[170,80]]]}';
-
     protected function setUp(): void
     {
         parent::setUp();
@@ -75,7 +72,7 @@ class HojasServicioTest extends TestCase
         ], $api)->assertUnprocessable()->assertJsonValidationErrors(['diagnostico', 'resultado']);
         $this->assertSame(0, HojaServicio::count());
 
-        // Hoja de servicio con equipos, materiales, foto y firma dibujada en la app
+        // Hoja de servicio con equipos, materiales, foto y el acta firmada (foto) desde la app
         $r = $this->post('/api/hojas', [
             'incidencia_id' => $incidencia->id,
             'tipo_servicio' => 'correctivo',
@@ -88,20 +85,21 @@ class HojasServicioTest extends TestCase
             'equipos' => [['equipo' => 'Cámara PTZ', 'marca' => 'Hikvision', 'serie' => 'ABC123', 'accion' => 'reparado', 'estado_final' => 'operativo']],
             'materiales' => [['descripcion' => 'Fuente 12V 2A', 'cantidad' => 1, 'unidad' => 'und']],
             'fotos' => [UploadedFile::fake()->image('antes.jpg')],
+            'fotos_descripcion' => ['Fuente dañada'],
+            'actas' => [UploadedFile::fake()->image('acta-firmada.jpg')],
             'receptor_nombre' => 'Ing. María Távara',
             'receptor_dni' => '41234567',
-            'firma_receptor' => $this->firmaTrazos,
-            'firma_tecnico' => $this->firmaTrazos,
-            'conforme' => '1',
         ], $api)->assertCreated()
-            ->assertJsonPath('data.estado', 'firmada');
+            ->assertJsonPath('data.estado', 'conforme')
+            ->assertJsonPath('data.tiene_acta', true);
 
         $hoja = HojaServicio::findOrFail($r->json('data.id'));
         $this->assertMatchesRegularExpression('/^HS-\d{4}-\d{5}$/', $hoja->numero);
         $this->assertSame($garantia->id, $hoja->garantia_id);
         $this->assertCount(1, $hoja->equipos);
-        $this->assertCount(1, $hoja->archivos);
-        Storage::disk('local')->assertExists($hoja->firma_receptor);
+        $this->assertCount(2, $hoja->archivos);
+        $this->assertSame('Fuente dañada', $hoja->archivos->firstWhere('categoria.value', 'foto')->descripcion);
+        $this->assertCount(1, $hoja->actas());
 
         // La hoja creó la atención técnica y dejó la incidencia resuelta (sin registrar nada aparte)
         $this->assertSame('resuelta', $incidencia->fresh()->estado->value);
@@ -109,7 +107,7 @@ class HojasServicioTest extends TestCase
         $this->assertSame('Fuente de 12V dañada por sobretensión', $hoja->atencion->diagnostico);
         $this->assertTrue($incidencia->fresh()->todasLasEvidencias()->contains('archivable_id', $hoja->id));
 
-        // La hoja firmada con conformidad reemplaza al acta escaneada
+        // El acta subida en la hoja permite cerrar la incidencia
         $this->assertTrue($incidencia->fresh()->tieneActaConformidad());
         $this->actingAs($this->supervisor)->post("/incidencias/{$incidencia->id}/cerrar")->assertSessionHasNoErrors();
         $this->assertSame('cerrada', $incidencia->fresh()->estado->value);
@@ -120,38 +118,79 @@ class HojasServicioTest extends TestCase
         $this->get("/hojas-servicio/{$hoja->id}/pdf-publico")->assertForbidden();
     }
 
-    public function test_firma_vacia_no_crea_hoja(): void
-    {
-        $token = $this->tecnico->createToken('app')->plainTextToken;
-
-        $this->post('/api/hojas', [
-            'proyecto_id' => $this->proyecto->id, 'tipo_servicio' => 'preventivo', 'fecha' => today()->toDateString(),
-            'hora_llegada' => '08:00', 'trabajo_realizado' => 'Mantenimiento preventivo',
-            'receptor_nombre' => 'Juan', 'firma_receptor' => '{"w":300,"h":120,"trazos":[]}',
-        ], ['Authorization' => "Bearer $token", 'Accept' => 'application/json'])->assertUnprocessable()->assertJsonValidationErrors('firma_receptor');
-
-        $this->assertSame(0, HojaServicio::count());
-    }
-
-    public function test_hoja_pendiente_se_firma_despues_desde_la_web_y_queda_bloqueada(): void
+    public function test_sin_acta_la_hoja_queda_pendiente_y_al_subirla_se_bloquea(): void
     {
         $this->actingAs($this->tecnico)->post('/hojas-servicio', [
             'proyecto_id' => $this->proyecto->id, 'tipo_servicio' => 'preventivo',
             'fecha' => today()->toDateString(), 'hora_llegada' => '08:00', 'hora_salida' => '09:00',
+            'verificaciones' => [['item' => 'Cuenta con EPP', 'resultado' => 'ok'], ['item' => 'Zona señalizada', 'resultado' => 'na']],
+            'mediciones' => [['parametro' => 'Tensión R-S', 'valor' => '380.9', 'unidad' => 'V'], ['parametro' => '', 'valor' => '']],
             'trabajo_realizado' => 'Limpieza y ajuste de cámaras',
         ])->assertRedirect();
 
         $hoja = HojaServicio::firstOrFail();
-        $this->assertSame('pendiente_firma', $hoja->estado->value);
+        $this->assertSame('registrada', $hoja->estado->value);
+        $this->assertCount(2, $hoja->verificaciones);
+        $this->assertSame([['parametro' => 'Tensión R-S', 'valor' => '380.9', 'unidad' => 'V']], $hoja->mediciones);
+        $this->actingAs($this->tecnico)->get("/hojas-servicio/{$hoja->id}")->assertOk()->assertSee('Falta el acta de conformidad firmada');
 
-        // Firma desde el navegador (canvas → PNG en base64)
-        $png = 'data:image/png;base64,'.base64_encode(UploadedFile::fake()->image('f.png', 300, 100)->getContent());
-        $this->actingAs($this->tecnico)->post("/hojas-servicio/{$hoja->id}/firmar", [
-            'receptor_nombre' => 'Jefe de Seguridad', 'firma_receptor' => $png, 'conforme' => '1',
+        // El técnico sube el acta firmada (foto o PDF): la hoja queda conforme y ya no se edita
+        $this->actingAs($this->tecnico)->post("/archivos/hoja_servicio/{$hoja->id}", [
+            'categoria' => 'acta_conformidad', 'archivos' => [UploadedFile::fake()->create('acta.pdf', 120, 'application/pdf')],
         ])->assertSessionHasNoErrors();
 
-        $this->assertSame('firmada', $hoja->fresh()->estado->value);
+        $this->assertSame('conforme', $hoja->fresh()->estado->value);
         $this->actingAs($this->tecnico)->get("/hojas-servicio/{$hoja->id}/edit")->assertForbidden();
+
+        // Si el supervisor retira el acta equivocada, la hoja vuelve a quedar pendiente
+        $acta = $hoja->archivos()->where('categoria', 'acta_conformidad')->firstOrFail();
+        $this->actingAs($this->supervisor)->delete("/archivos/{$acta->id}")->assertSessionHasNoErrors();
+        $this->assertSame('registrada', $hoja->fresh()->estado->value);
+    }
+
+    public function test_si_no_termina_queda_registrado_y_se_programa_otra_visita(): void
+    {
+        $this->actingAs($this->supervisor);
+        $incidencia = app(IncidenciaService::class)->registrar([
+            'proyecto_id' => $this->proyecto->id, 'titulo' => 'UPS no mantiene carga', 'descripcion' => 'Se apaga en cortes',
+            'prioridad' => 'alta', 'fecha_reporte' => now()->subHours(5), 'tecnico_id' => $this->tecnico->id,
+        ]);
+        $base = [
+            'incidencia_id' => $incidencia->id, 'tipo_servicio' => 'correctivo', 'fecha' => today()->toDateString(),
+            'hora_llegada' => '08:00', 'diagnostico' => 'Baterías degradadas', 'trabajo_realizado' => 'Prueba de baterías',
+        ];
+
+        // Si no se terminó, son obligatorios lo pendiente y la fecha de la próxima visita
+        $this->actingAs($this->tecnico)->post('/hojas-servicio', [...$base, 'resultado' => 'pendiente_repuesto'])
+            ->assertSessionHasErrors(['pendientes', 'proxima_visita']);
+
+        $this->actingAs($this->tecnico)->post('/hojas-servicio', [
+            ...$base, 'resultado' => 'pendiente_repuesto', 'pendientes' => 'Cambiar 4 baterías', 'proxima_visita' => today()->addDays(2)->toDateString(),
+        ])->assertSessionHasNoErrors();
+
+        $incidencia->refresh();
+        $this->assertSame('en_proceso', $incidencia->estado->value);
+        $this->assertSame(today()->addDays(2)->toDateString(), $incidencia->proxima_visita->toDateString());
+        $this->assertSame('Cambiar 4 baterías', $incidencia->motivo_reprogramacion);
+
+        // El supervisor puede cambiar la fecha; se avisa al técnico
+        \Illuminate\Support\Facades\Notification::fake();
+        $this->actingAs($this->supervisor)->post("/incidencias/{$incidencia->id}/reprogramar", [
+            'proxima_visita' => today()->addDays(4)->toDateString(), 'motivo_reprogramacion' => 'El cliente pidió el lunes',
+        ])->assertSessionHasNoErrors();
+        \Illuminate\Support\Facades\Notification::assertSentTo($this->tecnico, \App\Notifications\VisitaReprogramada::class);
+
+        // Segunda visita: el formulario parte de lo pendiente; al resolverse se limpia la próxima visita
+        $this->actingAs($this->tecnico)->get("/hojas-servicio/create?incidencia_id={$incidencia->id}")->assertOk()->assertSee('Continuación de la visita');
+        $this->actingAs($this->tecnico)->post('/hojas-servicio', [...$base, 'trabajo_realizado' => 'Cambio de 4 baterías', 'resultado' => 'resuelto'])
+            ->assertSessionHasNoErrors();
+
+        $incidencia->refresh();
+        $this->assertSame('resuelta', $incidencia->estado->value);
+        $this->assertNull($incidencia->proxima_visita);
+        $this->assertSame(2, $incidencia->hojasServicio()->count());
+        $this->assertSame(2, $incidencia->atenciones()->count());
+        $this->actingAs($this->supervisor)->get("/incidencias/{$incidencia->id}")->assertSee('Visitas realizadas (2)');
     }
 
     public function test_tecnico_solo_ve_sus_hojas(): void

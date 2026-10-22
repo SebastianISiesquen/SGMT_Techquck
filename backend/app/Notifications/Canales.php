@@ -7,7 +7,7 @@ trait Canales
 {
     public function via(object $notifiable): array
     {
-        $mailActivo = ! in_array(config('mail.default'), ['log', 'array', null], true) && $notifiable->email;
+        $mailActivo = \App\Support\Correo::activo() && $notifiable->email;
 
         return $mailActivo ? ['database', 'mail'] : ['database'];
     }

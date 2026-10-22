@@ -8,6 +8,7 @@ use App\Http\Resources\HojaServicioResource;
 use App\Models\HojaServicio;
 use App\Models\Incidencia;
 use App\Models\Proyecto;
+use App\Services\ArchivoService;
 use App\Services\HojaServicioService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -37,7 +38,7 @@ class HojaServicioApiController extends Controller
         return new HojaServicioResource($hoja->load(['proyecto.entidad', 'proyecto.clienteFinal', 'incidencia', 'mantenimiento.plan', 'tecnico', 'equipos', 'materiales', 'archivos']));
     }
 
-    /** multipart/form-data: datos, equipos[i][campo], materiales[i][campo], fotos[], firma (trazos JSON). */
+    /** multipart/form-data: datos, equipos[i][campo], materiales[i][campo], fotos[], fotos_descripcion[], actas[]. */
     public function store(HojaServicioRequest $request)
     {
         abort_unless($request->user()->can('hojas.registrar'), 403);
@@ -51,26 +52,27 @@ class HojaServicioApiController extends Controller
             $request->input('equipos', []),
             $request->input('materiales', []),
             $request->file('fotos', []),
-            $request->firma(),
+            $request->file('actas', []),
             'movil',
+            $request->input('fotos_descripcion', []),
         );
 
         return $this->show($hoja)->response()->setStatusCode(201);
     }
 
-    public function firmar(Request $request, HojaServicio $hoja)
+    /** Sube el acta de conformidad firmada por el cliente (foto o PDF): la hoja queda conforme. */
+    public function subirActa(Request $request, HojaServicio $hoja)
     {
-        Gate::authorize('update', $hoja);
+        Gate::authorize('view', $hoja);
+        abort_if($hoja->estado->value === 'anulada', 422, 'La hoja está anulada.');
+        abort_unless($hoja->tecnico_id === $request->user()->id || $request->user()->can('hojas.ver'), 403);
 
-        $datos = $request->validate([
-            'receptor_nombre' => ['required', 'string', 'max:255'],
-            'receptor_dni' => \App\Support\Reglas::documento(),
-            'receptor_cargo' => ['nullable', 'string', 'max:255'],
-            'firma_receptor' => ['required', 'string', 'max:1500000'],
-            'firma_tecnico' => ['nullable', 'string', 'max:1500000'],
-        ], ['firma_receptor.required' => 'Falta la firma del responsable de la entidad.']);
+        $request->validate(['actas' => ['required', 'array', 'max:5'], 'actas.*' => ArchivoService::reglas()], [], ['actas.*' => 'acta']);
 
-        $this->servicio->firmar($hoja, [...$datos, 'conforme' => $request->boolean('conforme')]);
+        foreach ($request->file('actas') as $archivo) {
+            ArchivoService::guardar($archivo, $hoja, 'acta_conformidad', 'Acta de conformidad firmada');
+        }
+        $this->servicio->registrarActa($hoja);
 
         return $this->show($hoja->fresh());
     }
@@ -85,6 +87,12 @@ class HojaServicioApiController extends Controller
     }
 
     /** Checklists de mantenimiento: { categoría normalizada: [puntos] }. */
+    /** Verificaciones previas de seguridad que el técnico marca antes de empezar. */
+    public function verificaciones()
+    {
+        return \App\Support\Ajustes::catalogo('verificaciones_previas');
+    }
+
     public function checklists(Request $request)
     {
         abort_unless($request->user()->can('hojas.registrar'), 403);

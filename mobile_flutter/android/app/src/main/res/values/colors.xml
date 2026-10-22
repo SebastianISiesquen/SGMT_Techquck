@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Fondo del ícono adaptativo (flutter_launcher_icons) -->
+    <color name="ic_launcher_background">#1f63c0</color>
+    <!-- Pantalla de arranque -->
+    <color name="marca_oscuro">#0B1D3A</color>
+</resources>

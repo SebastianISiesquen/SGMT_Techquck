@@ -11,14 +11,17 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 
-/** Hoja de servicio en campo, firmada por el responsable de la entidad. */
+/**
+ * Hoja de servicio: el registro de cada visita del técnico. La conformidad del cliente
+ * es el acta firmada (foto o PDF) que se sube después; no hay firmas digitales.
+ */
 class HojaServicio extends Model
 {
     protected $table = 'hojas_servicio';
 
     protected $fillable = [
-        'numero', 'proyecto_id', 'garantia_id', 'incidencia_id', 'mantenimiento_id', 'atencion_id', 'tecnico_id', 'diagnostico', 'resultado', 'tipo_servicio', 'fecha',
-        'hora_llegada', 'hora_salida', 'trabajo_realizado', 'observaciones', 'recomendaciones', 'estado', 'conforme',
+        'numero', 'proyecto_id', 'garantia_id', 'incidencia_id', 'mantenimiento_id', 'atencion_id', 'tecnico_id', 'diagnostico', 'resultado', 'pendientes', 'proxima_visita', 'tipo_servicio', 'fecha',
+        'hora_llegada', 'hora_salida', 'verificaciones', 'trabajo_realizado', 'observaciones', 'recomendaciones', 'mediciones', 'estado', 'conforme',
         'receptor_nombre', 'receptor_dni', 'receptor_cargo', 'firma_receptor', 'firma_tecnico', 'fecha_firma',
         'latitud', 'longitud', 'origen', 'motivo_anulacion',
     ];
@@ -29,6 +32,9 @@ class HojaServicio extends Model
             'tipo_servicio' => TipoServicio::class,
             'estado' => EstadoHoja::class,
             'fecha' => 'date',
+            'proxima_visita' => 'date',
+            'verificaciones' => 'array',
+            'mediciones' => 'array',
             'fecha_firma' => 'datetime',
             'conforme' => 'boolean',
         ];
@@ -96,14 +102,27 @@ class HojaServicio extends Model
         return $this->morphMany(Archivo::class, 'archivable')->latest();
     }
 
-    public function estaFirmada(): bool
+    /** Ya tiene el acta de conformidad firmada por el cliente. */
+    public function tieneActa(): bool
     {
-        return $this->estado === EstadoHoja::Firmada;
+        return $this->estado === EstadoHoja::Conforme;
     }
 
+    /** Se puede corregir mientras no tenga el acta ni esté anulada. */
     public function esEditable(): bool
     {
-        return $this->estado === EstadoHoja::PendienteFirma;
+        return $this->estado === EstadoHoja::Registrada;
+    }
+
+    public function actas()
+    {
+        return $this->archivos->filter(fn ($a) => $a->categoria->value === 'acta_conformidad');
+    }
+
+    /** El técnico dejó el trabajo pendiente y debe volver. */
+    public function requiereVisita(): bool
+    {
+        return (bool) ($this->resultado && ResultadoAtencion::tryFrom($this->resultado)?->requiereVisita());
     }
 
     /** Duración del servicio en campo, ej. "2 h 15 min". */

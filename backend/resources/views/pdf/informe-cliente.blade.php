@@ -15,30 +15,31 @@
         .kpis td { border: 1px solid #e5e7eb; text-align: center; padding: 8px 4px; width: 25%; }
         .kpis .n { font-size: 16px; font-weight: bold; color: #0b1d3a; }
         .kpis .t { font-size: 8px; color: #6b7280; }
+        .equipos td { vertical-align: middle; }
+        .muted { color: #6b7280; font-size: 8px; }
     </style>
 </head>
 <body>
-<header>
-    <div class="empresa">{{ $empresa['empresa_nombre'] }}</div>
-    <div class="sub">RUC {{ $empresa['empresa_ruc'] }} · {{ $empresa['empresa_direccion'] }}</div>
-    <div class="titulo">
-        <h1>Informe de servicio</h1>
-        <div class="sub">{{ $p->codigo }} · {{ $desde->format('d/m/Y') }} al {{ $hasta->format('d/m/Y') }}</div>
-    </div>
-</header>
-<footer>
-    <span>Informe {{ $p->codigo }} · generado el {{ now()->format('d/m/Y H:i') }}</span>
-    <span class="pag" style="float: right;"></span>
-</footer>
+@include('pdf._cabecera', [
+    'titulo' => 'INFORME DE SERVICIO',
+    'numero' => $p->codigo,
+    'datos' => $p->esServicio()
+        ? ['Periodo' => $desde->format('d/m/Y').' – '.$hasta->format('d/m/Y'), 'Emitido' => now()->format('d/m/Y')]
+        : ['Inicio de ejecución' => $p->fecha_inicio?->format('d/m/Y') ?? '—', 'Entrega / conformidad' => $p->fecha_entrega->format('d/m/Y'), 'Emitido' => now()->format('d/m/Y')],
+    'pie' => "Informe de servicio {$p->codigo}",
+])
 
 <table class="kv">
     <tr><td class="k">Cliente</td><td><strong>{{ $cliente->nombre }}</strong>{{ $cliente->ruc ? ' · RUC '.$cliente->ruc : '' }}</td></tr>
     @if ($p->clienteFinal)<tr><td class="k">Cliente final</td><td>{{ $p->clienteFinal->nombre }}</td></tr>@endif
     <tr><td class="k">{{ $p->esServicio() ? 'Contrato de servicio' : 'Proyecto' }}</td><td>{{ $p->codigo }} · {{ $p->nombre }}{{ $p->orden_compra ? ' · OC '.$p->orden_compra : '' }}</td></tr>
+    @if (! $p->esServicio() && $desde->toDateString() !== ($p->fecha_inicio ?? $p->fecha_entrega)->toDateString())
+        <tr><td class="k">Actividad reportada</td><td>{{ $desde->format('d/m/Y') }} – {{ $hasta->format('d/m/Y') }}</td></tr>
+    @endif
     @if ($p->esServicio())<tr><td class="k">Vigencia del contrato</td><td>{{ $p->fecha_entrega->format('d/m/Y') }} al {{ $p->fecha_fin?->format('d/m/Y') ?? '—' }}</td></tr>@endif
 </table>
 
-<h2>Resumen del periodo</h2>
+<h2>{{ $p->esServicio() ? 'Resumen del periodo' : 'Resumen del proyecto' }}</h2>
 <table class="kpis">
     <tr>
         <td><div class="n">{{ $hojas->count() }}</div><div class="t">Servicios en campo</div></td>
@@ -65,7 +66,7 @@
 @forelse ($hojas as $h)
     <div class="caja">
         <strong>{{ $h->numero }}</strong> · {{ $h->fecha->format('d/m/Y') }} · {{ $h->tipo_servicio->label() }}{{ $h->mantenimiento ? ' · '.$h->mantenimiento->etiqueta() : '' }}{{ $h->incidencia ? ' · Incidencia '.$h->incidencia->codigo : '' }}
-        · Técnico: {{ $h->tecnico?->name }} · {{ $h->estado->label() }}{{ $h->estaFirmada() ? ' por '.$h->receptor_nombre : '' }}
+        · Técnico: {{ $h->tecnico?->name }} · {{ $h->estado->label() }}{{ $h->tieneActa() && $h->receptor_nombre ? ' · recibió '.$h->receptor_nombre : '' }}
         @if ($h->diagnostico)<div class="pre" style="margin-top: 3px;"><strong>Diagnóstico:</strong> {{ $h->diagnostico }}</div>@endif
         <div class="pre" style="margin-top: 3px;"><strong>Trabajo:</strong> {{ $h->trabajo_realizado }}</div>
         @if ($h->equipos->isNotEmpty())<div style="margin-top: 3px;"><strong>Equipos:</strong> {{ $h->equipos->map(fn ($e) => $e->equipo.($e->serie ? ' ('.$e->serie.')' : '').' – '.$e->estadoLabel())->implode('; ') }}</div>@endif
@@ -88,18 +89,33 @@
     </table>
 @endif
 
-<h2>Estado de los equipos ({{ $equipos->count() }})</h2>
-<p>{{ collect($equiposPorEstado)->map(fn ($n, $e) => ($estados[$e] ?? $e).': '.$n)->implode(' · ') ?: 'Sin equipos registrados.' }}</p>
-@if ($equiposAtencion->isNotEmpty())
-    <p><strong>Equipos que requieren atención:</strong></p>
-    <table>
-        <thead><tr><th>Código</th><th>Equipo</th><th>Serie</th><th>Ubicación</th><th>Estado</th></tr></thead>
+<h2>{{ $p->esServicio() ? 'Estado de los equipos' : 'Equipos instalados' }} ({{ $equipos->count() }})</h2>
+@if ($equipos->isNotEmpty())
+    <p>{{ collect($equiposPorEstado)->map(fn ($n, $e) => ($estados[$e] ?? $e).': '.$n)->implode(' · ') }}</p>
+    <table class="equipos">
+        <thead><tr><th style="width: 4%;">N°</th><th>Equipo</th><th style="width: 16%;">Serie</th><th style="width: 24%;">Ubicación</th><th style="width: 11%;">Estado</th><th style="width: 72px; text-align: center;">FEI</th></tr></thead>
         <tbody>
-        @foreach ($equiposAtencion as $e)
-            <tr><td>{{ $e->codigo }}</td><td>{{ trim($e->categoria.' '.$e->marca.' '.$e->modelo) }}</td><td>{{ $e->serie }}</td><td>{{ $e->ubicacion }}</td><td>{{ $e->estadoLabel() }}</td></tr>
+        @foreach ($equipos as $e)
+            <tr>
+                <td class="num">{{ $loop->iteration }}</td>
+                <td><strong>{{ $e->categoria }}</strong>@if (trim($e->marca.' '.$e->modelo))<br>{{ trim($e->marca.' '.$e->modelo) }}@endif<br><span class="muted">{{ $e->codigo }}</span></td>
+                <td>{{ $e->serie ?: '—' }}</td>
+                <td>{{ collect([$e->area, $e->ubicacion])->filter()->implode(' · ') ?: '—' }}</td>
+                <td>{{ $e->estadoLabel() }}</td>
+                <td style="text-align: center; padding: 2px;">
+                    @if ($f = $feis[$e->id] ?? null)
+                        <img src="{{ $f['src'] }}" style="width: {{ $f['ancho'] }}px; height: {{ $f['alto'] }}px;" alt="FEI">
+                    @else
+                        <span class="muted">Sin foto</span>
+                    @endif
+                </td>
+            </tr>
         @endforeach
         </tbody>
     </table>
+    <p class="muted" style="margin-top: 3px;">FEI: foto del equipo instalado.</p>
+@else
+    <p>Sin equipos registrados.</p>
 @endif
 
 @if ($materiales->isNotEmpty())

@@ -29,6 +29,7 @@
                 <div class="mt-3 space-y-1 text-xs text-slate-500">
                     <p class="flex items-center gap-1.5"><x-icon name="building" class="size-3.5" /> {{ $i->proyecto->entidad->nombre }}</p>
                     @if ($i->ubicacion_detalle)<p class="flex items-center gap-1.5"><x-icon name="map-pin" class="size-3.5" /> {{ $i->ubicacion_detalle }}</p>@endif
+                    @if ($i->proxima_visita && $i->estaAbierta())<p class="flex items-center gap-1.5 font-medium {{ $i->proxima_visita->isToday() ? 'text-brand-700' : 'text-blue-700' }}"><x-icon name="calendar" class="size-3.5" /> Próxima visita: {{ $i->proxima_visita->isToday() ? 'hoy' : $i->proxima_visita->format('d/m/Y') }}</p>@endif
                     <p class="flex items-center gap-1.5"><x-icon name="calendar" class="size-3.5" /> Reportada {{ $i->fecha_reporte->format('d/m/Y H:i') }}
                         @if ($i->fecha_limite) · límite {{ $i->fecha_limite->format('d/m/Y H:i') }} @endif</p>
                 </div>

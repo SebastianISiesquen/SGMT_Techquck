@@ -1,0 +1,21 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // Emulador de Android Studio: 10.0.2.2 es siempre la PC (aunque cambie la IP de la red)
+      "name": "SGGP Técnico · emulador",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "args": ["--dart-define=API_URL=http://10.0.2.2:8000"]
+    },
+    {
+      // Celular real por USB: misma red WiFi que la PC. Cambie la IP si su red cambia (ipconfig)
+      "name": "SGGP Técnico · celular (WiFi)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "args": ["--dart-define=API_URL=http://10.4.138.61:8000"]
+    }
+  ]
+}

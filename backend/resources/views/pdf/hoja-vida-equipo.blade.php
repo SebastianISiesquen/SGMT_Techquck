@@ -15,18 +15,12 @@
     </style>
 </head>
 <body>
-<header>
-    <div class="empresa">{{ $empresa['empresa_nombre'] }}</div>
-    <div class="sub">RUC {{ $empresa['empresa_ruc'] }} · {{ $empresa['empresa_direccion'] }}</div>
-    <div class="titulo">
-        <h1>Hoja de vida del equipo</h1>
-        <div class="sub">{{ $equipo->codigo }} · Generado el {{ now()->format('d/m/Y H:i') }}</div>
-    </div>
-</header>
-<footer>
-    <span>{{ $equipo->codigo }} · {{ $equipo->nombre() }}</span>
-    <span class="pag" style="float: right;"></span>
-</footer>
+@include('pdf._cabecera', [
+    'titulo' => 'HOJA DE VIDA DEL EQUIPO',
+    'numero' => $equipo->codigo,
+    'datos' => ['Serie' => $equipo->serie ?? '—', 'Estado' => $equipo->estadoLabel(), 'Emitido' => now()->format('d/m/Y')],
+    'pie' => "Hoja de vida {$equipo->codigo} · {$equipo->nombre()}",
+])
 
 <div style="position: relative;">
     <div class="qr">
@@ -69,7 +63,7 @@
     <tbody>
     @forelse ($ev as $e)
         <tr>
-            <td>{{ $e->fecha->format('d/m/Y H:i') }}</td>
+            <td>{{ $e->fecha->format('d/m/Y h:i A') }}</td>
             <td><span class="tipo t-{{ $e->tipo }}">{{ $e->tipoLabel() }}</span></td>
             <td><strong>{{ $e->titulo }}</strong>
                 @if ($e->componente)<br>Componente: {{ $e->componente }}@endif

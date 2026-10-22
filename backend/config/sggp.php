@@ -96,10 +96,27 @@ return [
         'empresa_email' => '',
         'empresa_representante' => '',
         'empresa_cargo_representante' => 'Gerente General',
+        'empresa_logo' => '',
+        // Dirección pública del sistema (la que abre el QR del sticker). Vacía = APP_URL del .env.
+        'url_publica' => '',
+        // Correo saliente (SMTP). Vacío = se usa la configuración MAIL_* del .env.
+        'correo_host' => '',
+        'correo_puerto' => 587,
+        'correo_cifrado' => 'tls',
+        'correo_usuario' => '',
+        'correo_clave' => '',
+        'correo_remitente' => '',
+        'correo_nombre' => '',
+        // Hoja de servicio: verificaciones de seguridad antes de empezar y recomendaciones al pie
+        'verificaciones_previas' => "Cuenta con EPP en perfecto estado\nInstrumentos y herramientas en buenas condiciones\nAutorización del encargado para iniciar el servicio\nCondiciones inseguras y riesgos de la zona de trabajo identificados\nZona de trabajo y equipos señalizados",
+        'recomendaciones_generales' => "Mantener el área de los equipos limpia, despejada y ventilada.\nNo colocar objetos sobre los equipos ni obstruir su ventilación.\nToda manipulación de los equipos debe ser realizada por personal técnico calificado.\nAnte cualquier falla, comunicarse con el área de soporte indicando el código del sticker del equipo.",
         'dias_alerta_garantia' => 60,
         'avisos_garantia' => '60,30,15,7',
         'avisar_cliente_garantia' => 1,
         'dias_alerta_mantenimiento' => 7,
+        // Hora (24 h) de los envíos automáticos: alertas diarias e informe mensual (día 1)
+        'hora_alertas' => '07:00',
+        'hora_informes' => '07:30',
         'igv' => 18,
         'anios_historial' => 5,
         'dias_incidencia_sin_atender' => 3,

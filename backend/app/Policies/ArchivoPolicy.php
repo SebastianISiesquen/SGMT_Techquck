@@ -37,7 +37,9 @@ class ArchivoPolicy
             $padre instanceof Garantia => $user->can('garantias.gestionar'),
             $padre instanceof Incidencia, $padre instanceof Atencion => $user->can('incidencias.gestionar')
                 || ($archivo->subido_por === $user->id && $archivo->incidencia()?->estaAbierta()),
-            $padre instanceof HojaServicio => $padre->esEditable() && ($archivo->subido_por === $user->id || $user->can('hojas.ver')),
+            // En una hoja con acta solo el supervisor puede retirar el acta (por ejemplo, si se subió la equivocada)
+            $padre instanceof HojaServicio => ($padre->esEditable() && ($archivo->subido_por === $user->id || $user->can('hojas.ver')))
+                || ($archivo->categoria->value === 'acta_conformidad' && $padre->estado->value === 'conforme' && $user->can('hojas.ver')),
             $padre instanceof Equipo => $user->can('equipos.gestionar'),
             default => false,
         };

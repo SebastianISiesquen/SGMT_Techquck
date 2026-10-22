@@ -1,7 +1,7 @@
 @php($cant = fn ($n) => rtrim(rtrim(number_format($n, 2, '.', ''), '0'), '.'))
 <table>
     @isset($excel)
-        <tr><td colspan="10">{{ $titulo }} — {{ $empresa['empresa_nombre'] }} — {{ $generado->format('d/m/Y H:i') }}</td></tr>
+        <tr><td colspan="10">{{ $titulo }} — {{ $empresa['empresa_nombre'] }} — {{ $generado->format('d/m/Y h:i A') }}</td></tr>
     @endisset
     <thead>
     <tr><th>Fecha</th><th>Código</th><th>Artículo</th><th>Movimiento</th><th>Cantidad</th><th>Unidad</th><th>Costo (S/)</th><th>Cliente / proyecto</th><th>Hoja</th><th>Usuario</th></tr>
@@ -9,7 +9,7 @@
     <tbody>
     @foreach ($filas as $m)
         <tr>
-            <td>{{ $m->fecha->format('d/m/Y H:i') }}</td>
+            <td>{{ $m->fecha->format('d/m/Y h:i A') }}</td>
             <td>{{ $m->articulo->codigo }}</td>
             <td>{{ $m->articulo->nombreCompleto() }}</td>
             <td>{{ $m->tipoLabel() }}</td>
