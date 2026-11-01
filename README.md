@@ -4,41 +4,43 @@ Proyectos y servicios para clientes públicos y privados · **TECHQUK S.A.C.**
 
 | Parte | Carpeta | Tecnología |
 |---|---|---|
-| Plataforma web (Administrador, Supervisor, Técnico) + API | `backend/` | Laravel 12 · PHP 8.2+ · MySQL/MariaDB · Blade + Tailwind CSS 4 + Alpine.js · Chart.js |
-| App móvil del Técnico (Android / iOS) | `mobile/` | React Native · Expo SDK 57 · Expo Router · TypeScript |
+| Plataforma web (Administrador, Supervisor, Técnico) + API REST | `backend/` | Laravel 12 · PHP 8.2+ · MySQL/MariaDB · Blade + Tailwind CSS 4 + Alpine.js · Chart.js |
+| **App móvil del técnico** (Android) | `mobile_flutter/` | Flutter 3 · Dart |
+| App móvil (versión anterior) | `mobile/` | React Native · Expo SDK 57 · TypeScript |
 
-Otras librerías: **Sanctum** (tokens de la app), **spatie/laravel-permission** (roles y permisos por módulo), **DomPDF** (PDF), **Laravel Excel** (Excel), **bacon-qr-code** (QR de los stickers), **expo-camera** (escáner en la app).
+Otras librerías: **Sanctum** (tokens de la app), **spatie/laravel-permission** (roles y permisos por módulo), **DomPDF** (PDF), **Laravel Excel** (Excel), **bacon-qr-code** (QR de los stickers). En la app: `mobile_scanner` (QR), `image_picker` y `file_picker` (evidencias), `geolocator` (GPS), `flutter_secure_storage` (sesión) y `connectivity_plus` (trabajo sin señal).
 
 ## Módulos y requerimientos
 
 | Requerimiento | Dónde |
 |---|---|
-| RF01 Login por rol · RNF01 contraseñas con bcrypt | `AuthController`, `/login` · API `/api/login` |
+| RF01 Login por rol · RNF01 contraseñas con bcrypt | `AuthController`, `/login` · API `/api/login`. Bloqueo temporal tras varios intentos fallidos |
 | RF02 Usuarios, roles y permisos | *Administración → Usuarios / Roles y permisos*. El Administrador habilita módulos por rol **y** módulos adicionales por usuario |
-| RF03 Clientes públicos y privados | *Clientes*: un solo módulo para entidades del Estado y empresas privadas. Tipo (público / privado) y **sector** configurable (municipal, salud, minería…). Correos adicionales que reciben los avisos de vencimiento |
-| RF04 Proyectos y servicios | *Proyectos y servicios*: **implementaciones** (cámaras, servidores, cableado…) o **servicios** (mantenimiento, soporte) con fin de contrato. **Cliente final** para subcontratos (ABC contrata, el servicio es para el Ministerio), **orden de compra**. Los servicios vencidos pasan solos a *Finalizado* y dejan de listarse |
-| Equipos (hoja de vida) | *Equipos*: inventario de equipos de cada cliente (marca, modelo, serie, ubicación, área, responsable) con **código interno EQ-000001 y sticker con QR**. **Historial automático**: fallas, diagnósticos, mantenimientos, cambios de componentes, entregas y traslados. Búsqueda por serie o código, **hoja de vida en PDF** con un clic, importación desde Excel. Un equipo nuevo con serie anotado en una hoja de servicio se registra solo |
-| Mantenimientos programados | *Mantenimientos*: planes de N visitas cada X meses («Mantenimiento 2 de 4»), agenda de visitas próximas y atrasadas, aviso al técnico y al supervisor. La hoja de servicio de la visita la marca como realizada |
-| Almacén | *Almacén*: consumibles (pasta térmica, limpia contactos, conectores) y repuestos (discos, fuentes, cámaras) con kardex de entradas, salidas y ajustes, stock mínimo con alerta diaria. La hoja de servicio **descuenta del stock** lo que el técnico usó |
-| Checklists de mantenimiento | Puntos de control por categoría de equipo (laptop, cámara, NVR, servidor…). El técnico marca cada punto OK / observado / falla en la hoja; lo observado queda en el historial del equipo |
-| Informe al cliente | PDF del mes por proyecto o servicio (mantenimientos, incidencias, equipos, garantías, materiales). Se envía con un clic o solo el día 1 de cada mes (`sggp:informes`) |
-| Cotizaciones | *Cotizaciones*: para clientes sin garantía ni contrato que piden un diagnóstico. Ítems, IGV, PDF y seguimiento (enviada, aprobada, rechazada) |
-| RF05–RF06 Garantías con estado automático | *Garantías*: **Vigente / Próxima a vencer / Vencida**. Duración libre (3 meses, 1 año, 5 años o manual), orden de compra y observaciones. **Carta de garantía en PDF** generada por el sistema |
-| RF07–RF08 Incidencias y asignación | *Incidencias* por **equipo** y con **cobertura** (garantía, contrato o sin cobertura → cotización). El técnico ve los **antecedentes del equipo** antes de atender |
-| RF09–RF10 Atención técnica y evidencias (hoja de servicio única) | Web: *Mis incidencias* · **App móvil**: fotos (cámara/galería), acta de conformidad, PDF, Word, Excel y ubicación GPS |
+| RF03 Clientes públicos y privados | *Clientes*: entidades del Estado y empresas privadas en un solo módulo, con tipo (público / privado) y **sector** configurable. RUC validado. Correos que reciben los avisos de vencimiento |
+| RF04 Proyectos y servicios | **Proyectos de implementación** (cámaras, servidores, cableado…) y **contratos de servicio** (mantenimiento, soporte) con inicio y fin. **Cliente final** en subcontratos, **orden de compra**. Los **equipos se registran dentro del proyecto** (una fila por modelo con cantidad). Al crear un servicio se generan solos su garantía y su plan de mantenimientos |
+| RF05–RF06 Garantías con estado automático | **Vigente / Próxima a vencer / Vencida**. Duración libre, orden de compra y observaciones. **Carta de garantía en PDF** generada por el sistema |
+| Equipos (hoja de vida) | Buscador general por serie, código o cliente. **Código EQ-000001 y sticker con QR**: al escanearlo con cualquier celular se abre una **ficha pública** del equipo (datos, garantía e historial). **Historial automático** de fallas, diagnósticos, mantenimientos y cambios de componentes. Hoja de vida e informe por equipo en PDF. Importación desde Excel |
+| RF07–RF08 Incidencias y asignación | Incidencias con **uno o varios equipos** y **cobertura** (garantía, contrato o sin cobertura → cotización). Asignación a técnicos con fecha límite. El técnico ve los **antecedentes de cada equipo** antes de atender |
+| RF09–RF10 Hoja de servicio (registro único de la visita) | Diagnóstico, resultado, **evaluación del sitio** (ambiente, aire acondicionado, material inflamable, acceso), equipos intervenidos con **checklist**, materiales del almacén, fotos y GPS. La conformidad es el **acta firmada** que se sube (foto o PDF). Visitas de varios días: cada hoja indica lo pendiente y la próxima visita |
+| Mantenimientos programados | Planes de N visitas cada X meses («Mantenimiento 2 de 4»), agenda de visitas próximas y atrasadas, aviso al técnico y al supervisor |
+| Almacén | Consumibles y repuestos con kardex de entradas, salidas y ajustes; stock mínimo con alerta. La hoja de servicio **descuenta del stock** lo que el técnico usó |
+| Checklists de mantenimiento | Puntos de control por tipo de equipo (laptop, cámara, NVR, servidor…): OK / observado / falla. Lo observado queda en el historial del equipo |
+| Cotizaciones | Para clientes sin garantía ni contrato. Ítems, IGV y PDF. Una cotización aprobada genera la orden de trabajo o el contrato |
+| Informe al cliente | PDF por proyecto o servicio (mantenimientos, incidencias, equipos, garantías, materiales). Se envía con un clic o el día 1 de cada mes (`sggp:informes`) |
 | RF11 Trazabilidad | Historial de cada incidencia: registro → asignación → atención → cierre |
-| RF12 Dashboard | Indicadores y gráficos |
+| RF12 Dashboard | Indicadores y gráficos: garantías, incidencias, mantenimientos, equipos con fallas repetidas, cotizaciones |
 | RF13 Búsquedas y filtros | En todos los listados |
-| RF14 Alertas | Comando diario `sggp:alertas`: **aviso de vencimiento por correo al supervisor y al cliente** a los 60, 30, 15 y 7 días (configurable) y el día del vencimiento, sin repetir avisos; mantenimientos próximos; incidencias sin atender |
-| RF15 Reportes PDF / Excel | *Reportes* (8 reportes con filtros: proyectos, garantías, equipos, incidencias, atenciones, hojas, mantenimientos, cotizaciones) + informe técnico por incidencia + hoja de vida por equipo |
+| RF14 Alertas | Comando diario `sggp:alertas`: **aviso de vencimiento por correo al supervisor y al cliente** (60, 30, 15 y 7 días, configurable), mantenimientos próximos, incidencias sin atender y stock bajo. El correo se configura en *Configuración → Correo* |
+| RF15 Reportes PDF / Excel | 9 reportes con filtros: proyectos, garantías, equipos, incidencias, atenciones, hojas, mantenimientos, cotizaciones y almacén |
 | RF16 / RNF07 Auditoría | *Administración → Auditoría* |
 | RNF08 Archivos protegidos | Se guardan en `storage/app/private` y solo se descargan pasando el control de permisos |
+| Validaciones y mensajes | Validación en pantalla y en el servidor (RUC, DNI, teléfono, montos), ventana de confirmación propia, avisos flotantes y bloqueo de doble envío |
 
-**Ciclo de una incidencia:** Registrada → Asignada → En proceso → Resuelta (por el técnico) → Cerrada (el supervisor da conformidad; por defecto exige un *Acta de conformidad* adjunta o una *Hoja de servicio* firmada con conformidad). En cualquier punto puede anularse, y desde Resuelta o Cerrada puede reabrirse.
+**Ciclo de una incidencia:** Registrada → Asignada → En proceso → Resuelta (por el técnico) → Cerrada (el supervisor da conformidad con el acta firmada). En cualquier punto puede anularse, y desde Resuelta o Cerrada puede reabrirse.
 
 ---
 
-## 1. Ejecutar en local (XAMPP)
+## 1. Backend y plataforma web en local (XAMPP)
 
 Requisitos: XAMPP con PHP 8.2+ y MySQL, Composer y Node.js 20 o superior.
 
@@ -49,8 +51,8 @@ npm install
 cp .env.example .env          # ya configurado para MySQL de XAMPP (usuario root, sin clave)
 php artisan key:generate
 # Crear la BD "sgmt_techquk" en phpMyAdmin (utf8mb4_unicode_ci), luego:
-php artisan migrate --seed     # crea roles, permisos, admin y datos de demostración
-npm run build                  # o "npm run dev" mientras desarrolla
+php artisan migrate --seed     # crea roles, permisos, checklists, admin y datos de demostración
+npm run build                  # compila estilos y JavaScript
 php artisan serve --host=0.0.0.0 --port=8000
 ```
 
@@ -64,39 +66,58 @@ Abrir http://localhost:8000
 
 > Son usuarios de demostración. Cambie las contraseñas antes de usar el sistema con datos reales.
 
-Para ver el sistema con datos de demostración completos sin tocar su base, cree la BD `sgmt_techquk_demo` y ejecute:
-`DB_DATABASE=sgmt_techquk_demo php artisan migrate:fresh --seed`
+> Para compartir el sistema por un túnel o probarlo desde el celular use `npm run build` y no deje `npm run dev` abierto: con Vite en modo desarrollo los estilos solo cargan en la propia PC.
 
-Pruebas automáticas (usan la BD `sgmt_techquk_test`, que debe existir):
+**Tareas programadas en Windows:** `backend/scripts/programador.vbs` ejecuta `php artisan schedule:run` sin abrir ventanas. Programe la tarea de Windows «SGGP Programador» para que lo lance cada minuto.
+
+**Pruebas automáticas** (usan la BD `sgmt_techquk_test`, que debe existir): 94 casos, incluidos los de cada sprint (`Sprint01Test` a `Sprint04Test`).
 
 ```bash
 php artisan test
 ```
 
-### App móvil en su celular
+## 2. App móvil del técnico (Flutter)
 
-1. Instale **Expo Go** desde Play Store o App Store. El celular y la PC deben estar en la misma red WiFi.
-2. En `mobile/.env.local` ponga la IP de su PC (`ipconfig` → Dirección IPv4):
-   `EXPO_PUBLIC_API_URL=http://192.168.1.103:8000`
-3. Ejecute:
-   ```bash
-   cd mobile
-   npm install
-   npx expo start
-   ```
-4. Escanee el código QR con Expo Go e ingrese con un usuario **Técnico**.
+Requisitos: Flutter SDK 3 (`flutter doctor` sin errores), VS Code con las extensiones **Dart** y **Flutter**, y el backend encendido.
 
-> `mobile/.npmrc` incluye `legacy-peer-deps=true` porque los paquetes internos de Expo SDK 57 tienen un conflicto de dependencias *peer* opcionales (`react-native-worklets`) que hace fallar `npm install`. Para agregar paquetes use siempre `npx expo install <paquete>`.
+```bash
+cd mobile_flutter
+flutter pub get
+```
 
-El servidor también puede cambiarse desde la pantalla de login (enlace «Servidor» al pie).
+**Desde VS Code:** abra la carpeta `mobile_flutter`, vaya a *Ejecutar y depurar* (Ctrl + Shift + D), elija una configuración y pulse **F5**:
+
+| Configuración | Uso | Servidor |
+|---|---|---|
+| SGGP Técnico · Chrome | Ver la app en la PC (cámara y GPS limitados) | `http://localhost:8000` |
+| SGGP Técnico · emulador | Emulador de Android Studio | `http://10.0.2.2:8000` |
+| SGGP Técnico · celular (WiFi) | Celular por USB, en la misma WiFi que la PC | IP de la PC (`ipconfig`) |
+
+**Desde la terminal:**
+
+```bash
+flutter run -d chrome --dart-define=API_URL=http://localhost:8000
+flutter run --dart-define=API_URL=http://192.168.1.103:8000     # celular conectado por USB
+```
+
+El servidor también puede cambiarse desde la pantalla de inicio de sesión. Ingrese con un usuario **Técnico**.
+
+Funciones de la app: bandeja de incidencias, hoja de servicio con equipos, checklist, materiales, fotos y acta, **borradores guardados en el teléfono y envío diferido cuando no hay señal**, escáner del QR de los equipos, hoja de vida de cada equipo y agenda de mantenimientos.
+
+**APK para instalar en los celulares de los técnicos:**
+
+```bash
+flutter build apk --release --dart-define=API_URL=https://sggp.techquk.com.pe
+# Resultado: build/app/outputs/flutter-apk/app-release.apk
+```
 
 ---
 
-## 2. Subir a producción (online)
+## 3. Subir a producción (online)
 
 ### Opción recomendada: VPS (≈ USD 6–12 / mes)
 
-DigitalOcean, Vultr, Contabo o Hostinger VPS, con Ubuntu 24.04 y 1–2 GB de RAM. Permite subir archivos grandes, programar tareas (cron) y usar HTTPS gratis.
+DigitalOcean, Vultr, Contabo o Hostinger VPS, con Ubuntu 24.04 y 1–2 GB de RAM.
 
 ```bash
 # 1. Paquetes
@@ -110,9 +131,9 @@ sudo mysql -e "CREATE DATABASE sgmt_techquk CHARACTER SET utf8mb4 COLLATE utf8mb
   CREATE USER 'sggp'@'localhost' IDENTIFIED BY 'CLAVE_SEGURA';
   GRANT ALL ON sgmt_techquk.* TO 'sggp'@'localhost';"
 
-# 3. Código (suba el proyecto a GitHub, privado)
+# 3. Código
 sudo mkdir -p /var/www && cd /var/www
-sudo git clone https://github.com/SU_USUARIO/sggp.git && cd sggp/backend
+sudo git clone https://github.com/SebastianISiesquen/SGMT_Techquck.git sggp && cd sggp/backend
 sudo cp deploy/env.produccion.example .env     # edite dominio, claves, correo
 sudo composer install --no-dev --optimize-autoloader
 sudo npm ci && sudo npm run build
@@ -132,41 +153,17 @@ sudo ln -s /etc/nginx/sites-available/sggp /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 sudo certbot --nginx -d sggp.techquk.com.pe     # certificado SSL gratuito (Let's Encrypt)
 
-# 6. Tareas programadas: alertas diarias (07:00) y respaldo (02:30)
+# 6. Tareas programadas: alertas, informes y respaldo diario (02:30)
 sudo crontab -e
 #   * * * * * cd /var/www/sggp/backend && php artisan schedule:run >> /dev/null 2>&1
 #   30 2 * * * /var/www/sggp/backend/deploy/respaldo.sh >> /var/log/sggp-respaldo.log 2>&1
 ```
 
-En el proveedor de dominio, cree un registro **A** que apunte `sggp.techquk.com.pe` a la IP del VPS.
+En el proveedor de dominio, cree un registro **A** que apunte `sggp.techquk.com.pe` a la IP del VPS. Para publicar cambios después: `bash deploy/actualizar.sh`.
 
-Para publicar cambios después: `bash deploy/actualizar.sh`.
+**Correo:** configure el servidor SMTP en *Configuración → Correo* (o en `MAIL_*` del `.env`) y use «Enviar correo de prueba». Con Gmail use una *contraseña de aplicación*.
 
-**Correo (avisos a supervisores y clientes):** complete `MAIL_*` en el `.env`. Con Gmail use una *contraseña de aplicación* (cuenta Google → Seguridad → Verificación en 2 pasos → Contraseñas de aplicación); con el correo del dominio use los datos SMTP del hosting. Mientras `MAIL_MAILER=log`, los correos se escriben en `storage/logs/laravel.log` en lugar de enviarse.
-
-**Archivos en la nube (opcional):** para guardar evidencias en S3, Cloudflare R2 o DigitalOcean Spaces en lugar del disco del servidor, ejecute `composer require league/flysystem-aws-s3-v3`, ponga `ARCHIVOS_DISK=s3` y complete las variables `AWS_*` del `.env`.
-
-### Alternativa: hosting compartido con SSH (Hostinger Business, etc.)
-
-Laravel funciona si el plan ofrece PHP 8.2+, MySQL, SSH y Composer:
-
-1. Ejecute `npm run build` en su PC y suba la carpeta `backend` completa, incluida `public/build`.
-2. Apunte el dominio a `backend/public`.
-3. Ejecute `composer install --no-dev`, `php artisan migrate --force` y `php artisan db:seed --force`.
-4. En el panel de hosting, cree el cron `php artisan schedule:run` cada minuto.
-
-### App móvil para producción (APK)
-
-```bash
-cd mobile
-npm install -g eas-cli        # o use: npx eas-cli@latest <comando>
-eas login                     # cuenta gratuita en expo.dev
-# Edite eas.json → EXPO_PUBLIC_API_URL con su dominio https
-eas build -p android --profile preview      # genera un APK instalable para los técnicos
-eas build -p android --profile production   # .aab para publicar en Google Play
-```
-
-EAS compila en la nube, así que no necesita Android Studio. Al terminar entrega un enlace para descargar el APK.
+**Archivos en la nube (opcional):** para guardar evidencias en S3, Cloudflare R2 o DigitalOcean Spaces, ejecute `composer require league/flysystem-aws-s3-v3`, ponga `ARCHIVOS_DISK=s3` y complete las variables `AWS_*` del `.env`.
 
 ---
 
@@ -174,28 +171,36 @@ EAS compila en la nube, así que no necesita Android Studio. Al terminar entrega
 
 ```
 backend/
-  app/Enums/            Estados de incidencia y garantía, prioridad, resultado, categoría de archivo
   app/Models/           Entidad (cliente), Proyecto, Garantia, Equipo + EquipoEvento (hoja de vida), PlanMantenimiento + Mantenimiento,
-                        Cotizacion, Incidencia, Atencion, HojaServicio (+ equipos y materiales), Archivo, IncidenciaHistorial, Auditoria
-  app/Services/         IncidenciaService (ciclo de vida), EquipoService (historial automático), AlertaGarantiaService (avisos),
-                        HojaServicioService, FirmaService (firma → PNG), ArchivoService (almacenamiento privado), Auditor
+                        Incidencia, Atencion, HojaServicio (+ equipos, materiales y checklist), AlmacenArticulo + AlmacenMovimiento,
+                        Checklist, Cotizacion, Archivo, IncidenciaHistorial, Auditoria
+  app/Services/         IncidenciaService, HojaServicioService, EquipoService (historial automático), AlmacenService (kardex),
+                        AlertaGarantiaService, InformeClienteService, InformeEquipoService, ArchivoService, Auditor
   app/Http/Controllers/ Web, Api/ (app móvil) y Admin/
-  app/Console/Commands/ EnviarAlertas (sggp:alertas)
+  app/Console/Commands/ EnviarAlertas (sggp:alertas) y EnviarInformes (sggp:informes)
   config/sggp.php       Módulos/permisos, permisos por rol y valores por defecto
-  resources/views/      Interfaz Blade
+  resources/views/      Interfaz Blade y plantillas PDF
+  routes/api.php        API REST para la app móvil
   deploy/               Nginx, respaldo, actualización y .env de producción
-  tests/Feature/        Pruebas del flujo completo
-mobile/
-  src/app/              Pantallas (login, bandeja, detalle, registrar atención, hojas de servicio, equipos + escáner QR, mantenimientos, perfil)
-  src/components/       FirmaPad (firma con el dedo), Evidencias, componentes de interfaz
-  src/lib/              API, sesión, selección y compresión de evidencias
+  scripts/              programador.vbs (tareas programadas en Windows)
+  tests/Feature/        Pruebas automáticas por módulo y por sprint
+mobile_flutter/
+  lib/core/             API, sesión, modelos, archivos, borradores sin conexión y tema
+  lib/pantallas/        Login, bandeja, incidencia, hojas, nueva hoja, equipos, escáner QR, mantenimientos, perfil
+  lib/widgets/          Componentes de interfaz
+mobile/                 Versión anterior de la app (React Native / Expo)
 ```
 
 ## Protección de datos (Ley N° 29733)
 
-- Contraseñas cifradas con bcrypt. Tokens de la app con vencimiento de 30 días y guardados en el almacenamiento seguro del teléfono.
+- Contraseñas cifradas con bcrypt. Tokens de la app con vencimiento de 30 días, guardados en el almacenamiento seguro del teléfono.
 - Control de acceso por rol y permiso en cada ruta y en cada descarga de archivo.
+- La ficha pública del QR usa un código aleatorio: no se pueden recorrer los demás equipos.
 - HTTPS obligatorio en producción y cookies de sesión seguras y cifradas.
 - Auditoría de inicios de sesión, cambios, asignaciones, archivos adjuntados y reportes exportados.
-- Respaldo diario de la base de datos y los archivos (`deploy/respaldo.sh`).
+- Respaldo diario de la base de datos y los archivos (`deploy/respaldo.sh`). Los respaldos `.sql` no se suben al repositorio.
 - Los usuarios desactivados pierden el acceso de inmediato, también en la app.
+
+---
+
+**Autor:** Sebastian Inoñan Siesquen (SebastianInoSies) · Prácticas preprofesionales – Universidad Señor de Sipán · TECHQUK S.A.C., 2026
