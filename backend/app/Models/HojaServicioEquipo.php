@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\ResultadoAtencion;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -25,11 +26,16 @@ class HojaServicioEquipo extends Model
         'inoperativo' => 'Inoperativo',
     ];
 
-    protected $fillable = ['equipo_id', 'checklist', 'equipo', 'marca', 'modelo', 'serie', 'ubicacion', 'accion', 'estado_final', 'observacion'];
+    protected $fillable = ['equipo_id', 'checklist', 'equipo', 'marca', 'modelo', 'serie', 'ubicacion', 'accion', 'estado_final', 'diagnostico', 'resultado', 'observacion'];
 
     protected function casts(): array
     {
-        return ['checklist' => 'array'];
+        return ['checklist' => 'array', 'resultado' => ResultadoAtencion::class];
+    }
+
+    public function hoja(): BelongsTo
+    {
+        return $this->belongsTo(HojaServicio::class, 'hoja_servicio_id');
     }
 
     /** Puntos del checklist con resultado «observado» o «falla». */

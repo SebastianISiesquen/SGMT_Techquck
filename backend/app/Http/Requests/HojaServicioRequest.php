@@ -4,7 +4,9 @@ namespace App\Http\Requests;
 
 use App\Enums\ResultadoAtencion;
 use App\Enums\TipoServicio;
+use App\Models\Equipo;
 use App\Models\HojaServicioEquipo;
+use App\Models\Incidencia;
 use App\Services\ArchivoService;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -20,6 +22,8 @@ class HojaServicioRequest extends FormRequest
     public function rules(): array
     {
         return [
+            // Identificador de la app: un reenvío tras cortarse la señal no duplica la hoja
+            'uuid_cliente' => ['nullable', 'string', 'max:40'],
             'incidencia_id' => ['nullable', 'exists:incidencias,id'],
             'proyecto_id' => ['required_without:incidencia_id', 'nullable', 'exists:proyectos,id'],
             'garantia_id' => ['nullable', 'exists:garantias,id'],
@@ -37,6 +41,10 @@ class HojaServicioRequest extends FormRequest
             'verificaciones' => ['nullable', 'array', 'max:30'],
             'verificaciones.*.item' => ['nullable', 'string', 'max:200'],
             'verificaciones.*.resultado' => ['nullable', Rule::in(['ok', 'no', 'na'])],
+            // Evaluación preliminar del sitio: ambiente, aire acondicionado, material inflamable, acceso
+            'evaluacion' => ['nullable', 'array', 'max:10'],
+            'evaluacion.*.item' => ['nullable', 'string', 'max:80'],
+            'evaluacion.*.observacion' => ['nullable', 'string', 'max:500'],
             'mediciones' => ['nullable', 'array', 'max:40'],
             'mediciones.*.parametro' => ['nullable', 'string', 'max:80'],
             'mediciones.*.valor' => ['nullable', 'string', 'max:40'],
@@ -57,6 +65,11 @@ class HojaServicioRequest extends FormRequest
             'equipos.*.accion' => ['required_with:equipos.*.equipo,equipos.*.equipo_id', 'nullable', Rule::in(array_keys(HojaServicioEquipo::ACCIONES))],
             'equipos.*.estado_final' => ['required_with:equipos.*.equipo,equipos.*.equipo_id', 'nullable', Rule::in(array_keys(HojaServicioEquipo::ESTADOS))],
             'equipos.*.observacion' => ['nullable', 'string', 'max:255'],
+            // En una incidencia con varios equipos, cada uno tiene su diagnóstico, su resultado y sus fotos
+            'equipos.*.diagnostico' => ['nullable', 'string', 'max:3000'],
+            'equipos.*.resultado' => ['nullable', Rule::enum(ResultadoAtencion::class)],
+            'equipos.*.fotos' => ['nullable', 'array', 'max:10'],
+            'equipos.*.fotos.*' => ArchivoService::reglas(),
             'equipos.*.checklist' => ['nullable', 'array', 'max:40'],
             'equipos.*.checklist.*.item' => ['nullable', 'string', 'max:150'],
             'equipos.*.checklist.*.resultado' => ['nullable', Rule::in(['ok', 'observado', 'falla', 'na'])],
@@ -107,6 +120,9 @@ class HojaServicioRequest extends FormRequest
             'trabajo_realizado' => 'trabajo realizado',
             'equipos.*.accion' => 'acción sobre el equipo',
             'equipos.*.estado_final' => 'estado final del equipo',
+            'equipos.*.diagnostico' => 'diagnóstico del equipo',
+            'equipos.*.resultado' => 'resultado del equipo',
+            'equipos.*.fotos.*' => 'foto del equipo',
             'fotos.*' => 'foto',
             'actas.*' => 'acta de conformidad',
             'proxima_visita' => 'próxima visita',
@@ -116,15 +132,77 @@ class HojaServicioRequest extends FormRequest
     public function datosHoja(): array
     {
         return $this->safe()->only([
-            'incidencia_id', 'proyecto_id', 'garantia_id', 'mantenimiento_id', 'tipo_servicio', 'fecha', 'hora_llegada', 'hora_salida',
+            'uuid_cliente', 'incidencia_id', 'proyecto_id', 'garantia_id', 'mantenimiento_id', 'tipo_servicio', 'fecha', 'hora_llegada', 'hora_salida',
             'diagnostico', 'resultado', 'pendientes', 'proxima_visita', 'trabajo_realizado', 'observaciones', 'recomendaciones',
-            'verificaciones', 'mediciones', 'receptor_nombre', 'receptor_dni', 'receptor_cargo', 'latitud', 'longitud',
+            'verificaciones', 'evaluacion', 'mediciones', 'receptor_nombre', 'receptor_dni', 'receptor_cargo', 'latitud', 'longitud',
         ]);
     }
 
-    /** El resultado indica que el trabajo no se terminó y hay que volver. */
+    /** El resultado indica que el trabajo no se terminó y hay que volver (en todos o en algunos equipos). */
     public function requiereVisita(): bool
     {
-        return (bool) ResultadoAtencion::tryFrom((string) $this->input('resultado'))?->requiereVisita();
+        return (bool) ResultadoAtencion::tryFrom((string) $this->input('resultado'))?->requiereVisita()
+            || $this->resultadosDeEquipos()->contains(fn (ResultadoAtencion $r) => $r->requiereVisita());
+    }
+
+    /** Fotos de cada fila de equipos, con el mismo índice que equipos[]. */
+    public function fotosDeEquipos(): array
+    {
+        return collect($this->file('equipos', []))->map(fn ($fila) => $fila['fotos'] ?? [])->filter()->all();
+    }
+
+    /**
+     * Si cada equipo trae su resultado, el resultado de la visita sale de ellos:
+     * todos reparados → resuelto; todos pendientes → continúa; mezcla → resuelto y los pendientes
+     * pasan a otra incidencia. El diagnóstico general, si no se escribió, junta el de cada equipo.
+     */
+    protected function prepareForValidation(): void
+    {
+        $resultados = $this->resultadosDeEquipos();
+        if (! $this->input('incidencia_id') || $resultados->isEmpty()) {
+            return;
+        }
+
+        $pendientes = $resultados->filter(fn (ResultadoAtencion $r) => $r->requiereVisita());
+        $resultado = match (true) {
+            $pendientes->count() === $resultados->count() => $pendientes->contains(ResultadoAtencion::PendienteRepuesto) ? 'pendiente_repuesto' : 'parcial',
+            $pendientes->isEmpty() => $resultados->contains(ResultadoAtencion::Resuelto) ? 'resuelto' : 'no_procede',
+            default => 'resuelto',
+        };
+
+        $merge = ['resultado' => $resultado];
+        if (blank($this->input('diagnostico'))) {
+            $codigos = Equipo::whereIn('id', collect($this->input('equipos'))->pluck('equipo_id')->filter())->pluck('codigo', 'id');
+            $merge['diagnostico'] = collect($this->input('equipos'))->filter(fn ($e) => filled($e['diagnostico'] ?? null))
+                ->map(fn ($e) => ($codigos[$e['equipo_id'] ?? 0] ?? $e['equipo'] ?? 'Equipo').': '.$e['diagnostico'])->implode("\n") ?: null;
+        }
+        $this->merge($merge);
+    }
+
+    /** Cada equipo de la incidencia debe tener qué se encontró (diagnóstico) y cómo quedó (resultado). */
+    public function withValidator($validator): void
+    {
+        $validator->after(function ($validator) {
+            $incidencia = $this->input('incidencia_id') ? Incidencia::with('equipos')->find($this->input('incidencia_id')) : null;
+            if (! $incidencia || $incidencia->equipos->isEmpty()) {
+                return;
+            }
+
+            $filas = collect($this->input('equipos', []))->keyBy(fn ($e) => (int) ($e['equipo_id'] ?? 0));
+            foreach ($incidencia->equipos as $equipo) {
+                $fila = $filas->get($equipo->id);
+                if (! $fila) {
+                    $validator->errors()->add('equipos', "Falta el equipo {$equipo->codigo} de la incidencia: indique qué se hizo en él.");
+                } elseif (blank($fila['resultado'] ?? null) || blank($fila['diagnostico'] ?? null)) {
+                    $validator->errors()->add('equipos', "Indique el diagnóstico y el resultado del equipo {$equipo->codigo}.");
+                }
+            }
+        });
+    }
+
+    /** @return \Illuminate\Support\Collection<int, ResultadoAtencion> */
+    private function resultadosDeEquipos()
+    {
+        return collect($this->input('equipos', []))->map(fn ($e) => ResultadoAtencion::tryFrom((string) ($e['resultado'] ?? '')))->filter()->values();
     }
 }

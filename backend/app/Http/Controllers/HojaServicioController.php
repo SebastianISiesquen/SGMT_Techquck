@@ -52,7 +52,7 @@ class HojaServicioController extends Controller
 
     public function create(Request $request)
     {
-        $incidencia = $request->incidencia_id ? Incidencia::with(['proyecto.entidad', 'atenciones', 'equipo'])->findOrFail($request->incidencia_id) : null;
+        $incidencia = $request->incidencia_id ? Incidencia::with(['proyecto.entidad', 'atenciones', 'equipos'])->findOrFail($request->incidencia_id) : null;
         if ($incidencia) {
             Gate::authorize('view', $incidencia);
         }
@@ -96,19 +96,27 @@ class HojaServicioController extends Controller
             ]);
         }
         $hoja->verificaciones = collect(Ajustes::catalogo('verificaciones_previas'))->map(fn ($i) => ['item' => $i, 'resultado' => 'ok'])->all();
+        // Las condiciones del sitio casi no cambian: se parte de la última evaluación del mismo proyecto
+        $hoja->evaluacion = HojaServicio::where('proyecto_id', $hoja->proyecto_id)->whereNotNull('evaluacion')
+            ->where('estado', '!=', 'anulada')->latest('fecha')->latest('id')->first()?->evaluacion;
 
-        // El equipo de la incidencia aparece ya cargado en la lista de equipos intervenidos.
-        $equiposIniciales = $incidencia?->equipo ? [[
-            'equipo_id' => $incidencia->equipo->id, 'codigo' => $incidencia->equipo->codigo, 'equipo' => $incidencia->equipo->categoria,
-            'marca' => $incidencia->equipo->marca, 'modelo' => $incidencia->equipo->modelo, 'serie' => $incidencia->equipo->serie,
-            'ubicacion' => $incidencia->equipo->ubicacion, 'accion' => 'reparado', 'estado_final' => 'operativo', 'observacion' => '',
-        ]] : null;
+        // Los equipos con falla de la incidencia aparecen ya cargados: cada uno con su diagnóstico y resultado.
+        $equiposIniciales = $incidencia?->equipos->isNotEmpty() ? $incidencia->equipos->map(fn ($e) => [
+            'equipo_id' => $e->id, 'codigo' => $e->codigo, 'equipo' => $e->categoria, 'marca' => $e->marca, 'modelo' => $e->modelo,
+            'serie' => $e->serie, 'ubicacion' => $e->ubicacion, 'accion' => 'reparado', 'estado_final' => 'operativo',
+            'diagnostico' => '', 'resultado' => '', 'observacion' => '', 'de_incidencia' => true,
+        ])->all() : null;
 
+        // Segunda visita: se parte de los equipos de la visita anterior que siguen en la incidencia.
         if ($anterior && $anterior->equipos->isNotEmpty()) {
-            $equiposIniciales = $anterior->equipos->map(fn ($e) => [
-                ...$e->only(['equipo_id', 'equipo', 'marca', 'modelo', 'serie', 'ubicacion', 'accion', 'estado_final']),
-                'codigo' => $e->inventario?->codigo, 'observacion' => '', 'checklist' => [],
-            ])->all();
+            $deIncidencia = $incidencia->equipos->pluck('id');
+            $equiposIniciales = $anterior->equipos
+                ->filter(fn ($e) => $deIncidencia->isEmpty() || $deIncidencia->contains($e->equipo_id))
+                ->map(fn ($e) => [
+                    ...$e->only(['equipo_id', 'equipo', 'marca', 'modelo', 'serie', 'ubicacion', 'accion', 'estado_final', 'diagnostico']),
+                    'codigo' => $e->inventario?->codigo, 'resultado' => '', 'observacion' => '', 'checklist' => [],
+                    'de_incidencia' => $deIncidencia->contains($e->equipo_id),
+                ])->values()->all() ?: $equiposIniciales;
         }
 
         return view('hojas.form', [...$this->datosFormulario($hoja), 'incidencia' => $incidencia, 'mantenimiento' => $mantenimiento,
@@ -129,9 +137,15 @@ class HojaServicioController extends Controller
             $request->file('actas', []),
             'web',
             $request->input('fotos_descripcion', []),
+            $request->fotosDeEquipos(),
         );
 
         $mensaje = "Hoja de servicio {$hoja->numero} registrada.";
+        if ($separada = $hoja->incidencia?->derivadas()->latest('id')->first()) {
+            if ($separada->created_at->gte($hoja->created_at)) {
+                $mensaje .= " Los equipos pendientes pasaron a la incidencia {$separada->codigo}.";
+            }
+        }
         if ($hoja->requiereVisita()) {
             $mensaje .= " La incidencia continúa: próxima visita el {$hoja->proxima_visita->format('d/m/Y')}.";
         }

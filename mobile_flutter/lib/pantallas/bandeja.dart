@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/api.dart';
+import '../core/borradores.dart';
 import '../core/modelos.dart';
 import '../core/sesion.dart';
 import '../core/tema.dart';
@@ -133,6 +134,7 @@ class _BandejaPantallaState extends State<BandejaPantalla> {
               ],
             ),
             const SizedBox(height: 14),
+            _AvisosSinConexion(alEnviar: _cargar),
             if (_error.isNotEmpty) TextoError(_error),
             if (_cargando && _items.isEmpty) const Padding(padding: EdgeInsets.all(30), child: Cargando()),
             if (!_cargando && _items.isEmpty && _error.isEmpty) const Vacio('No tiene incidencias en esta bandeja.'),
@@ -217,10 +219,13 @@ class _Acceso extends StatelessWidget {
               Icon(icono, color: C.brand, size: 26),
               const SizedBox(height: 6),
               FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Text(texto, style: const TextStyle(fontWeight: FontWeight.w700, color: C.text)),
-                  ),
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  texto,
+                  style: const TextStyle(fontWeight: FontWeight.w700, color: C.text),
+                ),
+              ),
               Text(
                 detalle,
                 maxLines: 1,
@@ -267,4 +272,91 @@ class _Kpi extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// Hojas guardadas sin señal (pendientes de envío o rechazadas) y aviso de datos sin conexión.
+class _AvisosSinConexion extends StatefulWidget {
+  final Future<void> Function() alEnviar;
+  const _AvisosSinConexion({required this.alEnviar});
+
+  @override
+  State<_AvisosSinConexion> createState() => _AvisosSinConexionState();
+}
+
+class _AvisosSinConexionState extends State<_AvisosSinConexion> {
+  bool _enviando = false;
+
+  Future<void> _enviar() async {
+    setState(() => _enviando = true);
+    final enviadas = await Borradores.enviarPendientes();
+    if (!mounted) return;
+    setState(() => _enviando = false);
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(enviadas > 0 ? 'Se enviaron $enviadas hoja(s) de servicio.' : 'Aún no hay conexión con el servidor.')));
+    if (enviadas > 0) widget.alEnviar();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        ValueListenableBuilder<bool>(
+          valueListenable: Api.i.sinConexion,
+          builder: (_, sinConexion, _) => sinConexion
+              ? const Aviso(
+                  tono: 'amber',
+                  children: [Text('Sin conexión: se muestran los últimos datos descargados.', style: TextStyle(fontSize: 13))],
+                )
+              : const SizedBox.shrink(),
+        ),
+        ValueListenableBuilder<int>(
+          valueListenable: Borradores.cambios,
+          builder: (_, _, _) => FutureBuilder<List<Borrador>>(
+            future: Borradores.todos(),
+            builder: (_, snap) {
+              final lista = snap.data ?? [];
+              final pendientes = lista.where((b) => b.pendienteDeEnvio).toList();
+              final rechazadas = lista.where((b) => b.error != null).toList();
+              if (pendientes.isEmpty && rechazadas.isEmpty) return const SizedBox.shrink();
+              return Column(
+                children: [
+                  if (pendientes.isNotEmpty)
+                    Aviso(
+                      tono: 'blue',
+                      children: [
+                        Text(
+                          pendientes.length == 1
+                              ? '1 hoja de servicio pendiente de envío'
+                              : '${pendientes.length} hojas de servicio pendientes de envío',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        for (final b in pendientes) Text('• ${b.titulo}', style: const TextStyle(fontSize: 13)),
+                        const SizedBox(height: 4),
+                        const Text('Se enviarán solas cuando vuelva la señal.', style: TextStyle(fontSize: 12)),
+                        const SizedBox(height: 8),
+                        Boton(
+                          'Enviar ahora',
+                          icono: Icons.cloud_upload_outlined,
+                          variante: Variante.secondary,
+                          cargando: _enviando,
+                          onPressed: _enviar,
+                        ),
+                      ],
+                    ),
+                  for (final b in rechazadas)
+                    Aviso(
+                      tono: 'red',
+                      children: [
+                        Text('No se pudo enviar: ${b.titulo}', style: const TextStyle(fontWeight: FontWeight.w700)),
+                        Text('${b.error} Abra la visita para corregirla.', style: const TextStyle(fontSize: 13)),
+                      ],
+                    ),
+                ],
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
 }

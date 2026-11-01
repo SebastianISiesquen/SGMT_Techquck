@@ -40,8 +40,7 @@ class MisIncidenciasController extends Controller
         Gate::authorize('view', $incidencia);
 
         $incidencia->load(['proyecto.entidad', 'proyecto.clienteFinal', 'garantia', 'hojasServicio', 'atenciones.tecnico', 'atenciones.archivos', 'archivos', 'historial.usuario',
-            'equipo.eventos' => fn ($q) => $q->where(fn ($q) => $q->where('incidencia_id', '!=', $incidencia->id)->orWhereNull('incidencia_id'))
-                ->whereIn('tipo', ['falla', 'diagnostico', 'correctivo', 'cambio_componente', 'mantenimiento', 'observacion'])->limit(6)]);
+            'origen', 'derivadas', ...$incidencia->cargaDeAntecedentes()]);
 
         return view('mis-incidencias.show', [
             'incidencia' => $incidencia,

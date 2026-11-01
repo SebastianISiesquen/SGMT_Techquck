@@ -6,12 +6,14 @@ use App\Enums\EstadoIncidencia;
 use App\Enums\Prioridad;
 use App\Models\Cotizacion;
 use App\Models\Entidad;
+use App\Models\Equipo;
 use App\Models\Incidencia;
 use App\Models\Proyecto;
 use App\Models\User;
 use App\Services\ArchivoService;
 use App\Services\Auditor;
 use App\Services\IncidenciaService;
+use App\Services\InformeEquipoService;
 use App\Support\Ajustes;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
@@ -47,13 +49,14 @@ class IncidenciaController extends Controller
         return view('incidencias.form', [...$this->datosFormulario(new Incidencia([
             'proyecto_id' => $cotizacion?->proyecto_id ?? $request->proyecto_id,
             'garantia_id' => $request->garantia_id,
-            'equipo_id' => $cotizacion?->equipo_id ?? $request->equipo_id,
             'titulo' => $cotizacion ? "Trabajo cotizado: {$cotizacion->asunto}" : null,
             'descripcion' => $cotizacion ? "Cotización {$cotizacion->numero} aprobada por el cliente.\n".($cotizacion->diagnostico ?? '') : null,
             'cobertura' => $cotizacion ? 'sin_cobertura' : 'garantia',
             'prioridad' => Prioridad::Media,
             'fecha_reporte' => now(),
-        ])), 'cotizacion' => $cotizacion]);
+        ])), 'cotizacion' => $cotizacion,
+            // «Reportar falla» desde la ficha de un equipo o la orden de trabajo de una cotización
+            'equiposIniciales' => array_values(array_filter([$cotizacion?->equipo_id ?? $request->equipo_id]))]);
     }
 
     public function store(Request $request)
@@ -84,9 +87,8 @@ class IncidenciaController extends Controller
         }
 
         $incidencia->load(['proyecto.entidad', 'proyecto.clienteFinal', 'garantia', 'cotizaciones', 'hojasServicio.tecnico', 'tecnico',
-            // Antecedentes del equipo: lo ocurrido antes de esta incidencia.
-            'equipo.eventos' => fn ($q) => $q->where(fn ($q) => $q->where('incidencia_id', '!=', $incidencia->id)->orWhereNull('incidencia_id'))
-                ->whereIn('tipo', ['falla', 'diagnostico', 'correctivo', 'cambio_componente', 'mantenimiento', 'observacion'])->limit(6), 'asignador', 'registrador', 'cerrador',
+            // Antecedentes de cada equipo: lo ocurrido antes de esta incidencia.
+            ...$incidencia->cargaDeAntecedentes(), 'origen', 'derivadas', 'asignador', 'registrador', 'cerrador',
             'atenciones.tecnico', 'atenciones.archivos', 'archivos.autor', 'historial.usuario']);
 
         return view('incidencias.show', [
@@ -102,13 +104,18 @@ class IncidenciaController extends Controller
             return back()->withErrors(['general' => 'Solo se pueden editar incidencias abiertas.']);
         }
 
-        return view('incidencias.form', $this->datosFormulario($incidencia));
+        return view('incidencias.form', [...$this->datosFormulario($incidencia), 'equiposIniciales' => $incidencia->equipos()->pluck('equipos.id')->all()]);
     }
 
     public function update(Request $request, Incidencia $incidencia)
     {
-        $incidencia->update($this->validar($request));
+        $datos = $this->validar($request);
+        $equipos = $datos['equipos'];
+        unset($datos['equipos']);
+
+        $incidencia->update($datos);
         $cambios = Auditor::cambios($incidencia);
+        $this->servicio->actualizarEquipos($incidencia, $equipos);
 
         if ($cambios) {
             $this->servicio->historial($incidencia, 'edicion', null, null, 'Campos editados: '.implode(', ', array_keys($cambios)));
@@ -180,7 +187,7 @@ class IncidenciaController extends Controller
     {
         Gate::authorize('view', $incidencia);
 
-        $incidencia->load(['proyecto.entidad', 'proyecto.clienteFinal', 'garantia', 'equipo', 'tecnico', 'atenciones.tecnico', 'atenciones.archivos',
+        $incidencia->load(['proyecto.entidad', 'proyecto.clienteFinal', 'garantia', 'equipos', 'tecnico', 'atenciones.tecnico', 'atenciones.archivos',
             'archivos', 'historial.usuario', 'hojasServicio' => fn ($q) => $q->with(['tecnico', 'equipos', 'materiales'])]);
 
         // Fotos de la incidencia, sus atenciones y sus hojas (sin las actas), encuadradas para el PDF
@@ -192,6 +199,35 @@ class IncidenciaController extends Controller
             'fotos' => $fotos,
             'empresa' => Ajustes::all(),
         ])->setPaper('a4')->stream("Informe-{$incidencia->codigo}.pdf");
+    }
+
+    /** Informe técnico de un equipo reparado: su falla, diagnóstico, trabajo, repuestos, fotos y estado final. */
+    public function informeEquipo(Incidencia $incidencia, Equipo $equipo)
+    {
+        Gate::authorize('view', $incidencia);
+        abort_unless($incidencia->equipos()->whereKey($equipo->id)->exists(), 404);
+
+        return $this->pdfInformesEquipos($incidencia, collect([$equipo]), "Informe-{$incidencia->codigo}-{$equipo->codigo}.pdf");
+    }
+
+    /** Todos los informes técnicos de la incidencia en un solo PDF (una sección por equipo). */
+    public function informesEquipos(Incidencia $incidencia)
+    {
+        Gate::authorize('view', $incidencia);
+        abort_if($incidencia->equipos()->doesntExist(), 404);
+
+        return $this->pdfInformesEquipos($incidencia, $incidencia->equipos, "Informes-{$incidencia->codigo}.pdf");
+    }
+
+    private function pdfInformesEquipos(Incidencia $incidencia, $equipos, string $archivo)
+    {
+        $incidencia->load(['proyecto.entidad', 'proyecto.clienteFinal', 'garantia', 'tecnico', 'origen']);
+
+        return Pdf::loadView('pdf.informe-equipo', [
+            'incidencia' => $incidencia,
+            'informes' => InformeEquipoService::informes($incidencia, $equipos),
+            'empresa' => Ajustes::all(),
+        ])->setPaper('a4')->stream($archivo);
     }
 
     private function datosFormulario(Incidencia $incidencia): array
@@ -217,13 +253,17 @@ class IncidenciaController extends Controller
             'tecnico_id' => ['nullable', 'exists:users,id'],
         ]);
 
+        $proyecto = Proyecto::find($request->proyecto_id);
+        $permitidos = $proyecto ? ProyectoController::equiposDe($proyecto)->pluck('id') : collect();
+
         $datos = $request->validate([
             'proyecto_id' => ['required', 'exists:proyectos,id'],
             'garantia_id' => ['nullable', Rule::exists('garantias', 'id')->where('proyecto_id', $request->proyecto_id)],
-            'equipo_id' => ['nullable', 'integer', function ($attr, $valor, $fail) use ($request) {
-                $proyecto = Proyecto::find($request->proyecto_id);
-                if ($proyecto && ! ProyectoController::equiposDe($proyecto)->contains('id', (int) $valor)) {
-                    $fail('El equipo no pertenece al proyecto ni al cliente seleccionado.');
+            // Equipos con falla: uno o varios de los equipos instalados en el proyecto o en el cliente
+            'equipos' => ['nullable', 'array', 'max:100'],
+            'equipos.*' => ['integer', 'distinct', function ($attr, $valor, $fail) use ($proyecto, $permitidos) {
+                if ($proyecto && ! $permitidos->contains((int) $valor)) {
+                    $fail('Uno de los equipos no pertenece al proyecto ni al cliente seleccionado.');
                 }
             }],
             'cobertura' => ['nullable', Rule::in(array_keys(Incidencia::COBERTURAS))],
@@ -240,6 +280,6 @@ class IncidenciaController extends Controller
             'fecha_reporte.before_or_equal' => 'La fecha de reporte no puede ser posterior a la hora actual.',
         ]);
 
-        return [...$datos, 'cobertura' => $datos['cobertura'] ?? 'garantia'];
+        return [...$datos, 'equipos' => array_map('intval', $datos['equipos'] ?? []), 'cobertura' => $datos['cobertura'] ?? 'garantia'];
     }
 }

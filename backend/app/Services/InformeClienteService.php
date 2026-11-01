@@ -32,7 +32,7 @@ class InformeClienteService
                 ->orWhereBetween('fecha_ejecucion', [$desde->toDateString(), $hasta->toDateString()]))
             ->orderBy('fecha_programada')->get();
 
-        $incidencias = Incidencia::with(['equipo', 'tecnico'])
+        $incidencias = Incidencia::with(['equipos', 'tecnico'])
             ->where('proyecto_id', $proyecto->id)
             ->where(fn ($q) => $q->whereBetween('fecha_reporte', $rango)->orWhereBetween('fecha_cierre', $rango)
                 ->orWhere(fn ($q) => $q->abiertas()->where('fecha_reporte', '<', $rango[0])))

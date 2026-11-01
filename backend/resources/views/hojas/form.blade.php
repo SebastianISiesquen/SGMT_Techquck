@@ -4,19 +4,32 @@
                    :back="$hoja->exists ? route('hojas.show', $hoja) : url()->previous()" />
 
     @php
-        $equipoVacio = ['equipo_id' => null, 'codigo' => null, 'equipo' => '', 'marca' => '', 'modelo' => '', 'serie' => '', 'ubicacion' => '', 'accion' => 'revisado', 'estado_final' => 'operativo', 'observacion' => '', 'checklist' => []];
+        $equipoVacio = ['equipo_id' => null, 'codigo' => null, 'equipo' => '', 'marca' => '', 'modelo' => '', 'serie' => '', 'ubicacion' => '', 'accion' => 'revisado', 'estado_final' => 'operativo', 'diagnostico' => '', 'resultado' => '', 'observacion' => '', 'checklist' => []];
         $materialVacio = ['articulo_id' => '', 'descripcion' => '', 'cantidad' => 1, 'unidad' => 'und'];
         $equipos = old('equipos', $hoja->exists
             ? $hoja->equipos->map(fn ($e) => [...$e->only(array_keys($equipoVacio)), 'codigo' => $e->inventario?->codigo, 'checklist' => $e->checklist ?? []])->all()
             : ($equiposIniciales ?? [$equipoVacio]));
         $materiales = old('materiales', $hoja->exists ? $hoja->materiales->map->only(array_keys($materialVacio))->all() : []);
         $deIncidencia = (bool) ($incidencia ?? $hoja->incidencia_id);
+        // Equipos con falla de la incidencia: cada uno tiene su diagnóstico, su resultado y sus fotos
+        $equiposIncidencia = ($incidencia ?? $hoja->incidencia)?->equipos()->pluck('equipos.id')->all() ?? [];
+        // Al editar, también los equipos que ya pasaron a otra incidencia conservan su resultado
+        if ($hoja->exists) {
+            $equiposIncidencia = array_values(array_unique([...$equiposIncidencia, ...$hoja->equipos->whereNotNull('resultado')->pluck('equipo_id')->all()]));
+        }
+        $porEquipo = $deIncidencia && $equiposIncidencia;
         $verificaciones = old('verificaciones', $hoja->verificaciones ?? collect(\App\Support\Ajustes::catalogo('verificaciones_previas'))->map(fn ($i) => ['item' => $i, 'resultado' => 'ok'])->all());
         $mediciones = old('mediciones', $hoja->mediciones ?? []);
+        // Evaluación preliminar del sitio: un campo de observación por cada aspecto
+        $evaluacionGuardada = collect(old('evaluacion', $hoja->evaluacion ?? []))->pluck('observacion', 'item');
+        $evaluacion = collect(\App\Models\HojaServicio::EVALUACION_SITIO)
+            ->map(fn ($ejemplo, $item) => ['item' => $item, 'observacion' => $evaluacionGuardada[$item] ?? '', 'ejemplo' => $ejemplo])->values();
         $hora = fn ($v) => $v ? substr($v, 0, 5) : null;
     @endphp
 
     <form method="POST" action="{{ $hoja->exists ? route('hojas.update', $hoja) : route('hojas.store') }}" enctype="multipart/form-data" class="space-y-6"
+          @unless ($hoja->exists) data-borrador="{{ \App\Models\HojaServicio::claveBorrador($incidencia?->id, $mantenimiento?->id, $hoja->proyecto_id) }}" @endunless
+          data-con-errores="{{ $errors->any() ? 1 : 0 }}"
           x-data="opcionesDeProyecto('{{ route('proyectos.opciones', '__ID__') }}', '{{ old('garantia_id', $hoja->garantia_id) }}')"
           x-init="proyecto = '{{ old('proyecto_id', $hoja->proyecto_id) }}'; cargar()">
         @csrf
@@ -73,12 +86,27 @@
             </div>
         </div>
 
-        {{-- 2. Verificaciones previas de seguridad --}}
+        {{-- 2. Evaluación preliminar: condiciones del sitio y verificaciones de seguridad --}}
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">2. Evaluación preliminar</h3>
+                <span class="text-xs text-slate-500">Antes de iniciar el trabajo</span>
+            </div>
+            <div class="card-body grid gap-4 md:grid-cols-2">
+                @foreach ($evaluacion as $i => $e)
+                    <div>
+                        <input type="hidden" name="evaluacion[{{ $i }}][item]" value="{{ $e['item'] }}">
+                        <label class="label" for="f_eval_{{ $i }}">{{ $e['item'] }}</label>
+                        <textarea id="f_eval_{{ $i }}" name="evaluacion[{{ $i }}][observacion]" rows="2" class="input" placeholder="{{ $e['ejemplo'] }}">{{ $e['observacion'] }}</textarea>
+                    </div>
+                @endforeach
+            </div>
+        </div>
+
         @if ($verificaciones)
             <div class="card" x-data="{ items: @js(array_values($verificaciones)) }">
                 <div class="card-header">
-                    <h3 class="card-title">2. Verificaciones previas en sitio</h3>
-                    <span class="text-xs text-slate-500">Antes de iniciar el trabajo</span>
+                    <h3 class="card-title">Verificaciones de seguridad</h3>
                 </div>
                 <div class="card-body grid gap-2 md:grid-cols-2">
                     <template x-for="(v, i) in items" :key="i">
@@ -98,7 +126,7 @@
         @endif
 
         {{-- 3. Equipos intervenidos (del inventario del cliente o nuevos) --}}
-        <div class="card" x-data="filasEquipos(@js(array_values($equipos)), @js($equipoVacio), @js($checklists))">
+        <div class="card" x-data="filasEquipos(@js(array_values($equipos)), @js($equipoVacio), @js($checklists), @js($equiposIncidencia))">
             <div class="card-header">
                 <h3 class="card-title">3. Equipos intervenidos</h3>
                 <div class="flex flex-wrap items-center gap-2">
@@ -119,8 +147,35 @@
                     <div class="grid gap-2 rounded-lg border p-3 sm:grid-cols-6" :class="f.equipo_id ? 'border-brand-200 bg-brand-50/30' : 'border-slate-200'">
                         <input type="hidden" :name="`equipos[${i}][equipo_id]`" :value="f.equipo_id || ''">
                         <p x-show="f.equipo_id" class="flex items-center gap-1.5 text-xs font-medium text-brand-700 sm:col-span-6">
-                            <x-icon name="monitor" class="size-3.5" /> Equipo del inventario <span class="font-mono" x-text="f.codigo"></span>
+                            <x-icon name="monitor" class="size-3.5" />
+                            <span x-text="esDeIncidencia(f) ? 'Equipo con falla de la incidencia' : 'Equipo del inventario'"></span> <span class="font-mono" x-text="f.codigo"></span>
                         </p>
+
+                        {{-- Equipo con falla: diagnóstico, resultado y fotos propios (salen en su informe técnico) --}}
+                        <template x-if="esDeIncidencia(f)">
+                            <div class="grid gap-2 rounded-lg border border-red-100 bg-white p-3 sm:col-span-6 sm:grid-cols-2">
+                                <div class="sm:col-span-2">
+                                    <label class="label">Diagnóstico de este equipo <span class="text-red-500">*</span></label>
+                                    <textarea :name="`equipos[${i}][diagnostico]`" x-model="f.diagnostico" rows="2" required class="input"
+                                              placeholder="¿Qué falla tenía? ¿Cuál es la causa?"></textarea>
+                                </div>
+                                <div class="sm:col-span-2">
+                                    <label class="label">¿Cómo quedó este equipo? <span class="text-red-500">*</span></label>
+                                    <input type="hidden" :name="`equipos[${i}][resultado]`" :value="f.resultado">
+                                    <div class="grid gap-1.5 sm:grid-cols-4">
+                                        @foreach ($resultados as $k => $v)
+                                            <button type="button" @click="f.resultado = '{{ $k }}'" class="rounded-lg border px-2.5 py-2 text-left text-xs"
+                                                    :class="f.resultado === '{{ $k }}' ? '{{ ['resuelto' => 'border-emerald-500 bg-emerald-50 text-emerald-800', 'parcial' => 'border-amber-500 bg-amber-50 text-amber-900', 'pendiente_repuesto' => 'border-blue-500 bg-blue-50 text-blue-800', 'no_procede' => 'border-red-500 bg-red-50 text-red-800'][$k] }}' : 'border-slate-200 text-slate-600'">{{ $v }}</button>
+                                        @endforeach
+                                    </div>
+                                </div>
+                                <div class="sm:col-span-2">
+                                    <label class="label">Fotos de este equipo</label>
+                                    <input type="file" :name="`equipos[${i}][fotos][]`" accept="image/*" multiple
+                                           class="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-brand-700">
+                                </div>
+                            </div>
+                        </template>
                         <input :name="`equipos[${i}][equipo]`" x-model="f.equipo" @change="sincronizar(i)" list="categorias-hoja" placeholder="Equipo (ej. Cámara PTZ)" class="input sm:col-span-2">
                         <input :name="`equipos[${i}][marca]`" x-model="f.marca" placeholder="Marca" class="input">
                         <input :name="`equipos[${i}][modelo]`" x-model="f.modelo" placeholder="Modelo" class="input">
@@ -162,6 +217,7 @@
                     </div>
                 </template>
                 <p x-show="!filas.length" class="text-sm text-slate-500">Sin equipos registrados.</p>
+                @error('equipos')<p class="error">{{ $message }}</p>@enderror
                 @error('equipos.*')<p class="error">{{ $message }}</p>@enderror
             </div>
         </div>
@@ -170,22 +226,31 @@
         <div class="card">
             <div class="card-header"><h3 class="card-title">4. {{ $deIncidencia ? 'Diagnóstico y trabajo realizado' : 'Trabajo realizado' }}</h3></div>
             <div class="card-body grid gap-4 sm:grid-cols-2">
-                @if ($deIncidencia)
+                @if ($porEquipo)
+                    <x-textarea name="diagnostico" label="Diagnóstico general (opcional)" :value="$hoja->diagnostico" rows="2" class="sm:col-span-2"
+                                placeholder="El diagnóstico de cada equipo se registra arriba, en su ficha." />
+                @elseif ($deIncidencia)
                     <x-textarea name="diagnostico" label="Diagnóstico" :value="$hoja->diagnostico" required rows="3" class="sm:col-span-2"
                                 placeholder="¿Qué encontró? ¿Cuál es la causa de la falla?" />
                 @endif
                 <x-textarea name="trabajo_realizado" label="Trabajo realizado" :value="$hoja->trabajo_realizado" required rows="4" class="sm:col-span-2" />
 
                 {{-- Mediciones (tensión, corriente, temperatura…) --}}
-                <div class="sm:col-span-2" x-data="filas(@js(array_values($mediciones)), { parametro: '', valor: '', unidad: '' })">
+                <div class="sm:col-span-2" x-data="{ ...mediciones(@js(array_values($mediciones))), menu: '' }">
                     <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
                         <span class="label mb-0">Mediciones <span class="font-normal text-slate-400">(opcional)</span></span>
                         <div class="flex flex-wrap gap-1 text-xs">
-                            <button type="button" class="rounded bg-slate-100 px-2 py-1 hover:bg-brand-50" @click="['R-S','S-T','T-R','R-N','S-N','T-N','N-T'].forEach(p => filas.push({ parametro: 'Tensión ' + p, valor: '', unidad: 'V' }))">+ Tensiones</button>
-                            <button type="button" class="rounded bg-slate-100 px-2 py-1 hover:bg-brand-50" @click="['R','S','T','N'].forEach(p => filas.push({ parametro: 'Corriente I' + p.toLowerCase(), valor: '', unidad: 'A' }))">+ Corrientes</button>
+                            <button type="button" class="rounded px-2 py-1" :class="menu === 'tension' ? 'bg-brand-600 text-white' : 'bg-slate-100 hover:bg-brand-50'" @click="menu = menu === 'tension' ? '' : 'tension'">+ Tensiones</button>
+                            <button type="button" class="rounded px-2 py-1" :class="menu === 'corriente' ? 'bg-brand-600 text-white' : 'bg-slate-100 hover:bg-brand-50'" @click="menu = menu === 'corriente' ? '' : 'corriente'">+ Corrientes (amperaje)</button>
                             <button type="button" class="rounded bg-slate-100 px-2 py-1 hover:bg-brand-50" @click="filas.push({ parametro: 'Temperatura del ambiente', valor: '', unidad: '°C' })">+ Temperatura</button>
                             <button type="button" class="rounded bg-slate-100 px-2 py-1 hover:bg-brand-50" @click="agregar()">+ Otra</button>
                         </div>
+                    </div>
+                    {{-- Sistema eléctrico: se agregan los puntos de medición que corresponden --}}
+                    <div class="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-brand-100 bg-brand-50/60 p-2.5 text-sm" x-show="menu" x-cloak>
+                        <span class="text-slate-700" x-text="menu === 'tension' ? '¿Qué sistema tiene la tensión?' : '¿Qué sistema tiene la corriente?'"></span>
+                        <button type="button" class="btn btn-secondary btn-sm" @click="usarSistema(menu, 'monofasico'); menu = ''">Monofásico</button>
+                        <button type="button" class="btn btn-secondary btn-sm" @click="usarSistema(menu, 'trifasico'); menu = ''">Trifásico</button>
                     </div>
                     <div class="grid gap-2 md:grid-cols-2">
                         <template x-for="(f, i) in filas" :key="i">
@@ -247,7 +312,26 @@
         <div class="card" x-data="{ resultado: '{{ old('resultado', $hoja->resultado ?? ($deIncidencia ? 'resuelto' : '')) }}' }">
             <div class="card-header"><h3 class="card-title">5. Resultado de la visita</h3></div>
             <div class="card-body grid gap-4 sm:grid-cols-2">
-                @if ($deIncidencia)
+                @if ($porEquipo)
+                    {{-- El resultado sale de cada equipo: si unos quedan reparados y otros pendientes, los pendientes pasan a una incidencia nueva --}}
+                    <div class="sm:col-span-2 rounded-lg border p-3 text-sm"
+                         :class="$store.visita.pendientes && $store.visita.reparados ? 'border-blue-200 bg-blue-50 text-blue-900' : ($store.visita.pendientes ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-emerald-200 bg-emerald-50 text-emerald-900')">
+                        <p x-show="!$store.visita.pendientes && !$store.visita.reparados">Indique arriba cómo quedó cada equipo.</p>
+                        <p x-show="$store.visita.reparados && !$store.visita.pendientes" x-cloak><strong>Todos los equipos quedaron atendidos:</strong> la incidencia pasa a «Resuelta» y se emite el informe técnico de cada equipo.</p>
+                        <p x-show="$store.visita.pendientes && !$store.visita.reparados" x-cloak><strong>Ningún equipo quedó terminado:</strong> la incidencia sigue en proceso. Indique qué falta y cuándo se vuelve.</p>
+                        <p x-show="$store.visita.pendientes && $store.visita.reparados" x-cloak>
+                            <strong><span x-text="$store.visita.reparados"></span> equipo(s) reparado(s) y <span x-text="$store.visita.pendientes"></span> pendiente(s):</strong>
+                            al guardar, esta incidencia queda resuelta con los reparados y los pendientes pasan a una <strong>incidencia nueva</strong> con el mismo técnico.</p>
+                    </div>
+                    <div class="sm:col-span-2 grid gap-4 rounded-lg border border-amber-200 bg-amber-50/60 p-4 sm:grid-cols-3" x-show="$store.visita.pendientes" x-cloak>
+                        <x-textarea name="pendientes" label="¿Qué queda pendiente en esos equipos?" :value="$hoja->pendientes" rows="2" class="sm:col-span-2"
+                                    placeholder="Ej. Cambiar la fuente de la cámara EQ-000004; el repuesto llega el jueves" x-bind:required="$store.visita.pendientes > 0" />
+                        <x-input name="proxima_visita" type="date" label="Próxima visita" :value="$hoja->proxima_visita" :min="today()->toDateString()"
+                                 x-bind:required="$store.visita.pendientes > 0" />
+                    </div>
+                    @error('pendientes')<p class="error sm:col-span-2">{{ $message }}</p>@enderror
+                    @error('proxima_visita')<p class="error sm:col-span-2">{{ $message }}</p>@enderror
+                @elseif ($deIncidencia)
                     <div class="sm:col-span-2">
                         <label class="label">¿Cómo quedó la incidencia? <span class="text-red-500">*</span></label>
                         <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">

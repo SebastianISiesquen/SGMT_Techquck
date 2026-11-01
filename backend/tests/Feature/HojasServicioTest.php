@@ -193,6 +193,37 @@ class HojasServicioTest extends TestCase
         $this->actingAs($this->supervisor)->get("/incidencias/{$incidencia->id}")->assertSee('Visitas realizadas (2)');
     }
 
+    public function test_evaluacion_preliminar_del_sitio_y_mediciones_monofasicas(): void
+    {
+        $this->actingAs($this->tecnico)->post('/hojas-servicio', [
+            'proyecto_id' => $this->proyecto->id, 'tipo_servicio' => 'inspeccion',
+            'fecha' => today()->toDateString(), 'hora_llegada' => '08:00', 'hora_salida' => '09:00',
+            'evaluacion' => [
+                ['item' => 'Ambiente', 'observacion' => 'Data center del 3er piso'],
+                ['item' => 'Equipo de aire acondicionado', 'observacion' => '1 aire tipo confort de 24 000 BTU'],
+                ['item' => 'Material inflamable', 'observacion' => ''],
+                ['item' => 'Acceso y ubicación', 'observacion' => 'Escalera tipo gato'],
+            ],
+            'mediciones' => [['parametro' => 'Tensión monofásica L-N', 'valor' => '220.4', 'unidad' => 'V']],
+            'trabajo_realizado' => 'Inspección del rack',
+        ])->assertSessionHasNoErrors();
+
+        $hoja = HojaServicio::latest('id')->firstOrFail();
+        // Los aspectos sin observación no se guardan
+        $this->assertSame(['Ambiente', 'Equipo de aire acondicionado', 'Acceso y ubicación'], array_column($hoja->evaluacion, 'item'));
+
+        $this->actingAs($this->supervisor)->get("/hojas-servicio/{$hoja->id}")->assertOk()->assertSee('Escalera tipo gato');
+        $this->actingAs($this->supervisor)->get("/hojas-servicio/{$hoja->id}/pdf")->assertOk();
+
+        // La siguiente visita al mismo proyecto parte de la misma evaluación del sitio
+        $this->actingAs($this->tecnico)->get("/hojas-servicio/create?proyecto_id={$this->proyecto->id}")
+            ->assertOk()->assertSee('Data center del 3er piso');
+
+        $token = $this->tecnico->createToken('app')->plainTextToken;
+        $this->getJson("/api/hojas/{$hoja->id}", ['Authorization' => "Bearer $token"])
+            ->assertOk()->assertJsonPath('data.evaluacion.0.observacion', 'Data center del 3er piso');
+    }
+
     public function test_tecnico_solo_ve_sus_hojas(): void
     {
         $otro = User::factory()->create()->assignRole('Técnico');

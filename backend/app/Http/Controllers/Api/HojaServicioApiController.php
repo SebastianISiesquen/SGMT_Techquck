@@ -55,6 +55,7 @@ class HojaServicioApiController extends Controller
             $request->file('actas', []),
             'movil',
             $request->input('fotos_descripcion', []),
+            $request->fotosDeEquipos(),
         );
 
         return $this->show($hoja)->response()->setStatusCode(201);

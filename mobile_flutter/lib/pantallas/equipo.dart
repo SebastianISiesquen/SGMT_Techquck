@@ -36,7 +36,10 @@ class _EquipoPantallaState extends State<EquipoPantalla> {
   Widget build(BuildContext context) {
     final equipo = _equipo;
     if (equipo == null) {
-      return Scaffold(appBar: AppBar(title: const Text('Equipo')), body: const Cargando());
+      return Scaffold(
+        appBar: AppBar(title: const Text('Equipo')),
+        body: const Cargando(),
+      );
     }
 
     final eventos = equipo.eventos;

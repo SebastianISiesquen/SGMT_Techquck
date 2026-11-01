@@ -60,7 +60,10 @@ class _HojaPantallaState extends State<HojaPantalla> {
   Widget build(BuildContext context) {
     final hoja = _hoja;
     if (hoja == null) {
-      return Scaffold(appBar: AppBar(title: const Text('Hoja de servicio')), body: const Cargando());
+      return Scaffold(
+        appBar: AppBar(title: const Text('Hoja de servicio')),
+        body: const Cargando(),
+      );
     }
 
     final actas = hoja.archivos.where((a) => a.categoria == 'acta_conformidad').toList();
@@ -138,6 +141,9 @@ class _HojaPantallaState extends State<HojaPantalla> {
             ),
             const SizedBox(height: 12),
 
+            if (hoja.evaluacion.isNotEmpty)
+              Tarjeta(titulo: 'Evaluación preliminar del sitio', children: [for (final (item, obs) in hoja.evaluacion) Fila(item, obs)]),
+
             Tarjeta(
               titulo: 'Servicio',
               children: [
@@ -212,6 +218,12 @@ class _HojaPantallaState extends State<HojaPantalla> {
                             style: const TextStyle(color: C.textMuted, fontSize: 13),
                           ),
                           Text('${e.accion} → ${e.estadoFinal}', style: const TextStyle(color: C.textMuted, fontSize: 13)),
+                          if (e.diagnostico != null) Text('Diagnóstico: ${e.diagnostico}', style: const TextStyle(color: C.text, fontSize: 13)),
+                          if (e.resultadoLabel != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Insignia(e.resultadoLabel!, tono: colorEstado[e.resultado] ?? 'slate'),
+                            ),
                         ],
                       ),
                     ),

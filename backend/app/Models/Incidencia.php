@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -27,7 +28,7 @@ class Incidencia extends Model
     ];
 
     protected $fillable = [
-        'codigo', 'proyecto_id', 'garantia_id', 'equipo_id', 'cobertura', 'titulo', 'descripcion', 'prioridad', 'estado',
+        'codigo', 'proyecto_id', 'garantia_id', 'incidencia_origen_id', 'cobertura', 'titulo', 'descripcion', 'prioridad', 'estado',
         'canal', 'reportado_por', 'ubicacion_detalle', 'fecha_reporte', 'fecha_limite', 'proxima_visita', 'motivo_reprogramacion',
         'tecnico_id', 'asignado_por', 'fecha_asignacion', 'fecha_resolucion', 'fecha_cierre',
         'cerrado_por', 'registrado_por',
@@ -57,9 +58,44 @@ class Incidencia extends Model
         return $this->belongsTo(Garantia::class)->withTrashed();
     }
 
-    public function equipo(): BelongsTo
+    /** Equipos con falla: un mismo reporte puede afectar a varios equipos instalados del proyecto. */
+    public function equipos(): BelongsToMany
     {
-        return $this->belongsTo(Equipo::class)->withTrashed();
+        return $this->belongsToMany(Equipo::class)->withTrashed()->withTimestamps()->orderBy('equipos.codigo');
+    }
+
+    /** Incidencia de la que se separaron estos equipos (los que quedaron pendientes en una visita). */
+    public function origen(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'incidencia_origen_id');
+    }
+
+    /** Incidencias creadas con los equipos que quedaron pendientes en esta. */
+    public function derivadas(): HasMany
+    {
+        return $this->hasMany(self::class, 'incidencia_origen_id');
+    }
+
+    /** Incidencias anteriores de la cadena (de la más cercana a la original). */
+    public function cadenaDeOrigen(): \Illuminate\Support\Collection
+    {
+        $cadena = collect();
+        for ($i = $this->origen; $i && ! $cadena->contains('id', $i->id); $i = $i->origen) {
+            $cadena->push($i);
+        }
+
+        return $cadena;
+    }
+
+    /**
+     * Relación a cargar con los antecedentes de cada equipo: lo ocurrido antes de esta incidencia.
+     *
+     * @return array<string, \Closure>
+     */
+    public function cargaDeAntecedentes(): array
+    {
+        return ['equipos.eventos' => fn ($q) => $q->where(fn ($q) => $q->where('incidencia_id', '!=', $this->id)->orWhereNull('incidencia_id'))
+            ->whereIn('tipo', ['falla', 'diagnostico', 'correctivo', 'cambio_componente', 'mantenimiento', 'observacion'])->limit(6)];
     }
 
     public function cotizaciones(): HasMany
@@ -161,7 +197,7 @@ class Incidencia extends Model
             ->when($f['prioridad'] ?? null, fn ($q, $v) => $q->where('prioridad', $v))
             ->when($f['tecnico_id'] ?? null, fn ($q, $v) => $q->where('tecnico_id', $v))
             ->when($f['proyecto_id'] ?? null, fn ($q, $v) => $q->where('proyecto_id', $v))
-            ->when($f['equipo_id'] ?? null, fn ($q, $v) => $q->where('equipo_id', $v))
+            ->when($f['equipo_id'] ?? null, fn ($q, $v) => $q->whereHas('equipos', fn ($q) => $q->where('equipos.id', $v)))
             ->when($f['cobertura'] ?? null, fn ($q, $v) => $q->where('cobertura', $v))
             ->when($f['entidad_id'] ?? null, fn ($q, $v) => $q->whereHas('proyecto', fn ($q) => $q->where('entidad_id', $v)->orWhere('cliente_final_id', $v)))
             ->when($f['desde'] ?? null, fn ($q, $v) => $q->whereDate('fecha_reporte', '>=', $v))

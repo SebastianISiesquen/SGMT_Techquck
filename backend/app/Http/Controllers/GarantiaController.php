@@ -84,7 +84,7 @@ class GarantiaController extends Controller
     public function show(Garantia $garantia)
     {
         $garantia->load(['proyecto.entidad', 'proyecto.clienteFinal', 'archivos.autor', 'alertas', 'equipos',
-            'incidencias' => fn ($q) => $q->with(['tecnico', 'equipo'])->latest('fecha_reporte')]);
+            'incidencias' => fn ($q) => $q->with(['tecnico', 'equipos'])->latest('fecha_reporte')]);
 
         $alertas = app(AlertaGarantiaService::class);
 

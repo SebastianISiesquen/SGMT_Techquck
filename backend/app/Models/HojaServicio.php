@@ -19,11 +19,25 @@ class HojaServicio extends Model
 {
     protected $table = 'hojas_servicio';
 
+    /** Clave del borrador del navegador: una por visita (incidencia, mantenimiento o proyecto). */
+    public static function claveBorrador(?int $incidenciaId, ?int $mantenimientoId, ?int $proyectoId): string
+    {
+        return $incidenciaId ? "inc-$incidenciaId" : ($mantenimientoId ? "mant-$mantenimientoId" : 'proy-'.($proyectoId ?? 0));
+    }
+
+    /** Evaluación preliminar del sitio: aspecto evaluado => ejemplo de observación. */
+    public const EVALUACION_SITIO = [
+        'Ambiente' => 'Ej. Data center del 3er piso; poste en la vía pública',
+        'Equipo de aire acondicionado' => 'Ej. 1 aire tipo confort de 24 000 BTU; no tiene aire acondicionado',
+        'Material inflamable' => 'Ej. Cajas de cartón a los costados; equipo sobre cajas de madera',
+        'Acceso y ubicación' => 'Ej. Se accede por una escalera tipo gato',
+    ];
+
     protected $fillable = [
         'numero', 'proyecto_id', 'garantia_id', 'incidencia_id', 'mantenimiento_id', 'atencion_id', 'tecnico_id', 'diagnostico', 'resultado', 'pendientes', 'proxima_visita', 'tipo_servicio', 'fecha',
-        'hora_llegada', 'hora_salida', 'verificaciones', 'trabajo_realizado', 'observaciones', 'recomendaciones', 'mediciones', 'estado', 'conforme',
+        'hora_llegada', 'hora_salida', 'verificaciones', 'evaluacion', 'trabajo_realizado', 'observaciones', 'recomendaciones', 'mediciones', 'estado', 'conforme',
         'receptor_nombre', 'receptor_dni', 'receptor_cargo', 'firma_receptor', 'firma_tecnico', 'fecha_firma',
-        'latitud', 'longitud', 'origen', 'motivo_anulacion',
+        'latitud', 'longitud', 'origen', 'uuid_cliente', 'motivo_anulacion',
     ];
 
     protected function casts(): array
@@ -34,6 +48,7 @@ class HojaServicio extends Model
             'fecha' => 'date',
             'proxima_visita' => 'date',
             'verificaciones' => 'array',
+            'evaluacion' => 'array',
             'mediciones' => 'array',
             'fecha_firma' => 'datetime',
             'conforme' => 'boolean',

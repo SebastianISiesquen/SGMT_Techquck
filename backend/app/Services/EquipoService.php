@@ -93,36 +93,35 @@ class EquipoService
         return $evento;
     }
 
+    /** La falla reportada queda en la hoja de vida de cada equipo afectado (una sola vez por equipo). */
     public static function alRegistrarIncidencia(Incidencia $incidencia): void
     {
-        if (! $incidencia->equipo) {
-            return;
-        }
+        $anotados = EquipoEvento::where('incidencia_id', $incidencia->id)->where('tipo', 'falla')->pluck('equipo_id');
 
-        self::registrarEvento($incidencia->equipo, 'falla', "{$incidencia->titulo} ({$incidencia->codigo})", [
-            'detalle' => $incidencia->descripcion,
-            'incidencia_id' => $incidencia->id,
-            'fecha' => $incidencia->fecha_reporte,
-            'estado_equipo' => $incidencia->equipo->estado === 'de_baja' ? null : 'con_falla',
-        ]);
+        foreach ($incidencia->equipos()->get()->whereNotIn('id', $anotados) as $equipo) {
+            self::registrarEvento($equipo, 'falla', "{$incidencia->titulo} ({$incidencia->codigo})", [
+                'detalle' => $incidencia->descripcion,
+                'incidencia_id' => $incidencia->id,
+                'fecha' => $incidencia->fecha_reporte,
+                'estado_equipo' => $equipo->estado === 'de_baja' ? null : 'con_falla',
+            ]);
+        }
     }
 
     public static function alRegistrarAtencion(Atencion $atencion): void
     {
         $incidencia = $atencion->incidencia;
-        if (! $incidencia->equipo) {
-            return;
-        }
-
         $resuelto = in_array($atencion->resultado->value ?? $atencion->resultado, ['resuelto', 'no_procede'], true);
 
-        self::registrarEvento($incidencia->equipo, 'diagnostico', Str::limit($atencion->diagnostico, 150)." ({$incidencia->codigo})", [
-            'detalle' => "Diagnóstico: {$atencion->diagnostico}\nActividades: {$atencion->actividades}"
-                .($atencion->observaciones ? "\nObservaciones: {$atencion->observaciones}" : ''),
-            'incidencia_id' => $incidencia->id,
-            'fecha' => $atencion->fecha_fin ?? $atencion->fecha_inicio,
-            'estado_equipo' => $resuelto ? 'operativo' : 'en_reparacion',
-        ]);
+        foreach ($incidencia->equipos as $equipo) {
+            self::registrarEvento($equipo, 'diagnostico', Str::limit($atencion->diagnostico, 150)." ({$incidencia->codigo})", [
+                'detalle' => "Diagnóstico: {$atencion->diagnostico}\nActividades: {$atencion->actividades}"
+                    .($atencion->observaciones ? "\nObservaciones: {$atencion->observaciones}" : ''),
+                'incidencia_id' => $incidencia->id,
+                'fecha' => $atencion->fecha_fin ?? $atencion->fecha_inicio,
+                'estado_equipo' => $resuelto ? 'operativo' : 'en_reparacion',
+            ]);
+        }
     }
 
     /**
@@ -154,7 +153,9 @@ class EquipoService
             self::registrarEvento($equipo, $componente ? 'cambio_componente' : $tipo,
                 "{$hoja->tipo_servicio->label()} · {$fila->accionLabel()} (hoja {$hoja->numero})", [
                     'detalle' => collect([
-                        $hoja->diagnostico ? 'Diagnóstico: '.$hoja->diagnostico : null,
+                        // En una incidencia, cada equipo trae su propio diagnóstico y resultado
+                        ($fila->diagnostico ?: $hoja->diagnostico) ? 'Diagnóstico: '.($fila->diagnostico ?: $hoja->diagnostico) : null,
+                        $fila->resultado ? 'Resultado: '.$fila->resultado->label() : null,
                         $fila->observacion,
                         'Trabajo: '.$hoja->trabajo_realizado,
                         $hallazgos->isNotEmpty() ? "Checklist con observaciones:\n".$hallazgos->implode("\n") : null,

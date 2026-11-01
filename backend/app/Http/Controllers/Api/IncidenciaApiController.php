@@ -51,8 +51,7 @@ class IncidenciaApiController extends Controller
         Gate::authorize('view', $incidencia);
 
         $incidencia->load(['proyecto.entidad', 'proyecto.clienteFinal', 'garantia', 'hojasServicio',
-            'equipo.eventos' => fn ($q) => $q->where(fn ($q) => $q->where('incidencia_id', '!=', $incidencia->id)->orWhereNull('incidencia_id'))
-                ->whereIn('tipo', ['falla', 'diagnostico', 'correctivo', 'cambio_componente', 'mantenimiento', 'observacion'])->limit(6), 'tecnico', 'atenciones.tecnico', 'atenciones.archivos', 'archivos', 'historial.usuario']);
+            ...$incidencia->cargaDeAntecedentes(), 'origen', 'derivadas', 'tecnico', 'atenciones.tecnico', 'atenciones.archivos', 'archivos', 'historial.usuario']);
 
         return new IncidenciaResource($incidencia);
     }

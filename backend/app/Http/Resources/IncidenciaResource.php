@@ -46,22 +46,27 @@ class IncidenciaResource extends JsonResource
                 'contacto' => $lugar->contacto_nombre,
                 'contacto_telefono' => $lugar->contacto_telefono,
             ],
-            'equipo' => $this->whenLoaded('equipo', fn () => $this->equipo ? [
-                'id' => $this->equipo->id,
-                'codigo' => $this->equipo->codigo,
-                'categoria' => $this->equipo->categoria,
-                'nombre' => $this->equipo->nombre(),
-                'ubicacion' => collect([$this->equipo->area, $this->equipo->ubicacion])->filter()->implode(' · ') ?: null,
-                'responsable' => $this->equipo->responsable,
-                'estado_label' => $this->equipo->estadoLabel(),
-                // Antecedentes: lo que otros técnicos encontraron antes en este equipo
-                'antecedentes' => $this->equipo->relationLoaded('eventos') ? $this->equipo->eventos->map(fn ($e) => [
+            // Equipos con falla: cada uno con sus antecedentes (lo que otros técnicos encontraron antes)
+            'equipos' => $this->whenLoaded('equipos', fn () => $this->equipos->map(fn ($eq) => [
+                'id' => $eq->id,
+                'codigo' => $eq->codigo,
+                'categoria' => $eq->categoria,
+                'nombre' => $eq->nombre(),
+                'marca' => $eq->marca,
+                'modelo' => $eq->modelo,
+                'serie' => $eq->serie,
+                'ubicacion' => collect([$eq->area, $eq->ubicacion])->filter()->implode(' · ') ?: null,
+                'responsable' => $eq->responsable,
+                'estado_label' => $eq->estadoLabel(),
+                'antecedentes' => $eq->relationLoaded('eventos') ? $eq->eventos->map(fn ($e) => [
                     'fecha' => $e->fecha->toIso8601String(),
                     'tipo_label' => $e->tipoLabel(),
                     'titulo' => $e->titulo,
                     'detalle' => $e->detalle,
                 ]) : [],
-            ] : null),
+            ])),
+            'origen' => $this->whenLoaded('origen', fn () => $this->origen ? ['id' => $this->origen->id, 'codigo' => $this->origen->codigo] : null),
+            'derivadas' => $this->whenLoaded('derivadas', fn () => $this->derivadas->map(fn ($d) => ['id' => $d->id, 'codigo' => $d->codigo])),
             'hojas' => $this->whenLoaded('hojasServicio', fn () => $this->hojasServicio->map(fn ($h) => [
                 'id' => $h->id, 'numero' => $h->numero, 'estado' => $h->estado->value, 'estado_label' => $h->estado->label(),
             ])),

@@ -191,6 +191,9 @@ Route::middleware(['auth', 'activo'])->group(function () {
     Route::get('incidencias', [IncidenciaController::class, 'index'])->name('incidencias.index')->middleware('can:incidencias.ver');
     Route::get('incidencias/{incidencia}', [IncidenciaController::class, 'show'])->name('incidencias.show');
     Route::get('incidencias/{incidencia}/informe', [IncidenciaController::class, 'informe'])->name('incidencias.informe');
+    // Informe técnico por cada equipo reparado (uno o todos en un PDF)
+    Route::get('incidencias/{incidencia}/informes-equipos', [IncidenciaController::class, 'informesEquipos'])->name('incidencias.informes-equipos');
+    Route::get('incidencias/{incidencia}/equipos/{equipo}/informe', [IncidenciaController::class, 'informeEquipo'])->name('incidencias.informe-equipo');
 
     // Atención técnica (vista del Técnico en la web; la app móvil usa la API)
     Route::middleware('can:atenciones.registrar')->group(function () {

@@ -83,7 +83,7 @@
         <tbody>
         @foreach ($incidencias as $i)
             <tr><td>{{ $i->codigo }}</td><td>{{ $i->fecha_reporte->format('d/m/Y') }}</td><td>{{ $i->titulo }}</td>
-                <td>{{ $i->equipo ? $i->equipo->codigo.' · '.$i->equipo->categoria : '—' }}</td><td>{{ $i->estado->label() }}</td><td>{{ $i->fecha_cierre?->format('d/m/Y') }}</td></tr>
+                <td>{{ $i->equipos->map(fn ($e) => $e->codigo.' · '.$e->categoria)->implode(', ') ?: '—' }}</td><td>{{ $i->estado->label() }}</td><td>{{ $i->fecha_cierre?->format('d/m/Y') }}</td></tr>
         @endforeach
         </tbody>
     </table>

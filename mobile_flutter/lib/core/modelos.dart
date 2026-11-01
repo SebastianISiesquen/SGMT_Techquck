@@ -85,10 +85,11 @@ class Antecedente {
   Antecedente.fromJson(Json j) : fecha = _s(j['fecha']) ?? '', tipoLabel = _s(j['tipo_label']) ?? '', titulo = _s(j['titulo']) ?? '';
 }
 
+/// Equipo con falla de la incidencia (una incidencia puede afectar a varios equipos).
 class EquipoIncidencia {
   final int id;
   final String codigo, categoria, nombre;
-  final String? ubicacion, responsable;
+  final String? marca, modelo, serie, ubicacion, responsable, estadoLabel;
   final List<Antecedente> antecedentes;
 
   EquipoIncidencia.fromJson(Json j)
@@ -96,9 +97,20 @@ class EquipoIncidencia {
       codigo = _s(j['codigo']) ?? '',
       categoria = _s(j['categoria']) ?? '',
       nombre = _s(j['nombre']) ?? '',
+      marca = _s(j['marca']),
+      modelo = _s(j['modelo']),
+      serie = _s(j['serie']),
+      estadoLabel = _s(j['estado_label']),
       ubicacion = _s(j['ubicacion']),
       responsable = _s(j['responsable']),
       antecedentes = _lista(j['antecedentes'], Antecedente.fromJson);
+}
+
+/// Incidencia vinculada: de la que se separaron los equipos pendientes, o a la que pasaron.
+class IncidenciaRef {
+  final int id;
+  final String codigo;
+  IncidenciaRef.fromJson(Json j) : id = _i(j['id']), codigo = _s(j['codigo']) ?? '';
 }
 
 class HojaResumen {
@@ -142,7 +154,9 @@ class Incidencia {
   final String? ubicacionDetalle, reportadoPor, fechaLimite, proximaVisita, motivoReprogramacion;
   final bool slaVencido, puedeAtender;
   final ProyectoIncidencia proyecto;
-  final EquipoIncidencia? equipo;
+  final List<EquipoIncidencia> equipos;
+  final IncidenciaRef? origen;
+  final List<IncidenciaRef> derivadas;
   final GarantiaIncidencia? garantia;
   final List<HojaResumen> hojas;
   final List<Atencion> atenciones;
@@ -169,7 +183,9 @@ class Incidencia {
       motivoReprogramacion = _s(j['motivo_reprogramacion']),
       puedeAtender = _b(j['puede_atender']),
       proyecto = ProyectoIncidencia.fromJson(Json.from(j['proyecto'] as Map)),
-      equipo = _obj(j['equipo'], EquipoIncidencia.fromJson),
+      equipos = _lista(j['equipos'], EquipoIncidencia.fromJson),
+      origen = _obj(j['origen'], IncidenciaRef.fromJson),
+      derivadas = _lista(j['derivadas'], IncidenciaRef.fromJson),
       garantia = _obj(j['garantia'], GarantiaIncidencia.fromJson),
       hojas = _lista(j['hojas'], HojaResumen.fromJson),
       atenciones = _lista(j['atenciones'], Atencion.fromJson),
@@ -201,9 +217,12 @@ class Notificacion {
 
 class EquipoHoja {
   final String equipo, accion, estadoFinal;
-  final String? marca, modelo, serie, observacion;
+  final String? marca, modelo, serie, observacion, diagnostico, resultado, resultadoLabel;
   EquipoHoja.fromJson(Json j)
     : equipo = _s(j['equipo']) ?? '',
+      diagnostico = _s(j['diagnostico']),
+      resultado = _s(j['resultado']),
+      resultadoLabel = _s(j['resultado_label']),
       marca = _s(j['marca']),
       modelo = _s(j['modelo']),
       serie = _s(j['serie']),
@@ -230,6 +249,9 @@ class HojaServicio {
   final String? incidenciaCodigo;
   final List<EquipoHoja> equipos;
   final List<Medicion> mediciones;
+
+  /// Evaluación preliminar del sitio: (aspecto, observación).
+  final List<(String, String)> evaluacion;
   final List<Archivo> archivos;
 
   HojaServicio.fromJson(Json j)
@@ -261,6 +283,7 @@ class HojaServicio {
       incidenciaCodigo = _s((j['incidencia'] as Map?)?['codigo']),
       equipos = _lista(j['equipos'], EquipoHoja.fromJson),
       mediciones = _lista(j['mediciones'], Medicion.fromJson),
+      evaluacion = _lista(j['evaluacion'], (e) => (_s(e['item']) ?? '', _s(e['observacion']) ?? '')),
       archivos = _lista(j['archivos'], Archivo.fromJson),
       pdfUrl = _s(j['pdf_url']) ?? '';
 }

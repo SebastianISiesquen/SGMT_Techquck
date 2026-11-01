@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\Relations\MorphOne;
@@ -87,9 +88,9 @@ class Equipo extends Model
         return $this->hasMany(EquipoEvento::class)->orderByDesc('fecha')->orderByDesc('id');
     }
 
-    public function incidencias(): HasMany
+    public function incidencias(): BelongsToMany
     {
-        return $this->hasMany(Incidencia::class);
+        return $this->belongsToMany(Incidencia::class)->withTimestamps();
     }
 
     public function archivos(): MorphMany

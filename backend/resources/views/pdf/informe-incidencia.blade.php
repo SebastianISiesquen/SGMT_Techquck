@@ -26,8 +26,8 @@
     <tr><td class="k">Proyecto / servicio</td><td>{{ $p->codigo }} · {{ $p->nombre }}</td><td class="k">Orden de compra</td><td>{{ $p->orden_compra ?? '—' }}</td></tr>
     <tr><td class="k">Garantía</td><td>{{ $incidencia->garantia ? $incidencia->garantia->etiqueta().' · vence '.$incidencia->garantia->fecha_vencimiento->format('d/m/Y') : '—' }}</td>
         <td class="k">Cobertura</td><td>{{ $incidencia->coberturaLabel() }}</td></tr>
-    @if ($incidencia->equipo)
-        <tr><td class="k">Equipo</td><td colspan="3">{{ $incidencia->equipo->codigo }} · {{ $incidencia->equipo->nombre() }}{{ $incidencia->equipo->ubicacion ? ' · '.$incidencia->equipo->ubicacion : '' }}</td></tr>
+    @if ($incidencia->equipos->isNotEmpty())
+        <tr><td class="k">{{ $incidencia->equipos->count() > 1 ? 'Equipos' : 'Equipo' }}</td><td colspan="3">{{ $incidencia->equipos->map(fn ($e) => $e->codigo.' · '.$e->nombre().($e->ubicacion ? ' · '.$e->ubicacion : ''))->implode('; ') }}</td></tr>
     @endif
     <tr><td class="k">Reportado por</td><td>{{ $incidencia->reportado_por ?? '—' }}{{ $incidencia->canal ? ' ('.$incidencia->canal.')' : '' }} · {{ $incidencia->fecha_reporte->format('d/m/Y h:i A') }}</td>
         <td class="k">Prioridad</td><td>{{ $incidencia->prioridad->label() }}</td></tr>
@@ -48,7 +48,7 @@
             <tbody>
                 @if ($h->diagnostico)<tr><td style="width: 20%;" class="muted">Diagnóstico</td><td class="pre">{{ $h->diagnostico }}</td></tr>@endif
                 <tr><td style="width: 20%;" class="muted">Trabajo realizado</td><td class="pre">{{ $h->trabajo_realizado }}</td></tr>
-                @if ($h->equipos->isNotEmpty())<tr><td class="muted">Equipos</td><td>{{ $h->equipos->map(fn ($e) => trim($e->equipo.' '.$e->marca.' '.$e->modelo).($e->serie ? ' (S/N '.$e->serie.')' : '').': '.$e->accionLabel().', '.mb_strtolower($e->estadoLabel()))->implode('; ') }}</td></tr>@endif
+                @if ($h->equipos->isNotEmpty())<tr><td class="muted">Equipos</td><td>@foreach ($h->equipos as $e)<div>{{ trim($e->equipo.' '.$e->marca.' '.$e->modelo).($e->serie ? ' (S/N '.$e->serie.')' : '').': '.$e->accionLabel().', '.mb_strtolower($e->estadoLabel()) }}{{ $e->resultado ? ' · '.$e->resultado->label() : '' }}@if ($e->diagnostico)<span class="muted"> — {{ $e->diagnostico }}</span>@endif</div>@endforeach</td></tr>@endif
                 @if ($h->materiales->isNotEmpty())<tr><td class="muted">Materiales</td><td>{{ $h->materiales->map(fn ($m) => rtrim(rtrim(number_format($m->cantidad, 2), '0'), '.').' '.$m->unidad.' '.$m->descripcion)->implode('; ') }}</td></tr>@endif
                 @if ($h->resultado)<tr><td class="muted">Resultado</td><td><span class="etiqueta {{ $resultadoColor[$h->resultado] ?? 'e-gris' }}">{{ $h->resultadoLabel() }}</span>
                     @if ($h->requiereVisita()) · Pendiente: {{ $h->pendientes }} · próxima visita {{ $h->proxima_visita?->format('d/m/Y') }}@endif</td></tr>@endif

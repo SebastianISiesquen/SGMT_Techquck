@@ -15,10 +15,12 @@ window.Chart = Chart;
 
 // Selector dependiente: al elegir un proyecto se cargan sus garantías y equipos,
 // y se sugiere la cobertura (garantía vigente, contrato de servicio o sin cobertura).
-Alpine.data('opcionesDeProyecto', (urlBase, garantiaInicial, equipoInicial = '', coberturaInicial = '') => ({
+Alpine.data('opcionesDeProyecto', (urlBase, garantiaInicial, equiposIniciales = [], coberturaInicial = '') => ({
     proyecto: '',
     garantia: garantiaInicial || '',
-    equipo: equipoInicial || '',
+    // Equipos con falla: puede ser uno o varios de los equipos instalados
+    seleccionados: (equiposIniciales || []).map(String),
+    buscarEquipo: '',
     cobertura: coberturaInicial || 'garantia',
     coberturaManual: false,
     garantias: [],
@@ -35,23 +37,34 @@ Alpine.data('opcionesDeProyecto', (urlBase, garantiaInicial, equipoInicial = '',
         // Se conserva la garantía indicada; si no es de este proyecto, se propone la primera activa.
         const elegida = d.garantias.find((o) => String(o.id) === String(this.garantia))
             || d.garantias.find((o) => o.estado !== 'vencida' && o.estado !== 'anulada');
-        const equipo = (d.equipos || []).find((o) => String(o.id) === String(this.equipo));
         this.garantias = d.garantias;
         this.equipos = d.equipos || [];
         this.contratoVigente = !!d.contrato_vigente;
         this.cargando = false;
         this.garantia = '';
-        this.equipo = '';
+        // Solo quedan marcados los equipos que pertenecen al proyecto elegido
+        this.seleccionados = this.seleccionados.filter((id) => this.equipos.some((o) => String(o.id) === id));
         // Se asigna después de que Alpine dibuje las opciones, para que el select la muestre.
         this.$nextTick(() => {
             this.garantia = elegida ? String(elegida.id) : '';
-            this.equipo = equipo ? String(equipo.id) : '';
             this.sugerirCobertura();
         });
     },
-    // Si el equipo tiene una garantía propia, se usa esa.
+    get equiposFiltrados() {
+        const t = this.buscarEquipo.trim().toLowerCase();
+        return t ? this.equipos.filter((o) => [o.texto, o.serie, o.ubicacion].join(' ').toLowerCase().includes(t)) : this.equipos;
+    },
+    get equiposElegidos() {
+        return this.equipos.filter((o) => this.seleccionados.includes(String(o.id)));
+    },
+    marcarEquipo(id) {
+        id = String(id);
+        this.seleccionados = this.seleccionados.includes(id) ? this.seleccionados.filter((x) => x !== id) : [...this.seleccionados, id];
+        this.alElegirEquipo();
+    },
+    // Si el primer equipo marcado tiene una garantía propia, se usa esa.
     alElegirEquipo() {
-        const e = this.equipos.find((o) => String(o.id) === String(this.equipo));
+        const e = this.equiposElegidos[0];
         if (e && e.garantia_id && this.garantias.some((g) => String(g.id) === String(e.garantia_id))) {
             this.garantia = String(e.garantia_id);
         }
@@ -96,10 +109,28 @@ Alpine.data('filas', (iniciales, vacia) => ({
 }));
 
 // Equipos de la hoja de servicio: además de las filas, arma el checklist según la categoría del equipo.
-Alpine.data('filasEquipos', (iniciales, vacia, checklists) => ({
+// Resultado de cada equipo de la incidencia (la tarjeta «Resultado de la visita» lo resume).
+Alpine.store('visita', {
+    reparados: 0,
+    pendientes: 0,
+    actualizar(filas, deIncidencia) {
+        const propias = filas.filter((f) => deIncidencia.includes(Number(f.equipo_id)) && f.resultado);
+        this.pendientes = propias.filter((f) => ['parcial', 'pendiente_repuesto'].includes(f.resultado)).length;
+        this.reparados = propias.length - this.pendientes;
+    },
+});
+
+Alpine.data('filasEquipos', (iniciales, vacia, checklists, deIncidencia = []) => ({
     filas: iniciales && iniciales.length ? iniciales : [],
+    deIncidencia: (deIncidencia || []).map(Number),
     init() {
         this.filas.forEach((_, i) => this.sincronizar(i));
+        this.$watch('filas', () => Alpine.store('visita').actualizar(this.filas, this.deIncidencia), { deep: true });
+        Alpine.store('visita').actualizar(this.filas, this.deIncidencia);
+    },
+    // Equipo con falla de la incidencia: lleva su propio diagnóstico, resultado y fotos
+    esDeIncidencia(f) {
+        return this.deIncidencia.includes(Number(f.equipo_id));
     },
     agregar() {
         this.filas.push({ ...vacia, checklist: [] });
@@ -125,6 +156,35 @@ Alpine.data('filasEquipos', (iniciales, vacia, checklists) => ({
         const previo = f.checklist || [];
         if (JSON.stringify(previo.map((p) => p.item)) === JSON.stringify(items)) return;
         this.filas[i].checklist = items.map((item) => previo.find((p) => p.item === item) || { item, resultado: '', nota: '' });
+    },
+}));
+
+// Mediciones de la hoja: tensiones y corrientes según el sistema (monofásico o trifásico).
+const PUNTOS_MEDICION = {
+    tension: {
+        monofasico: ['L-N', 'L-T', 'N-T'],
+        trifasico: ['R-S', 'S-T', 'T-R', 'R-N', 'S-N', 'T-N', 'N-T'],
+    },
+    corriente: {
+        monofasico: ['L', 'N'],
+        trifasico: ['R', 'S', 'T', 'N'],
+    },
+};
+Alpine.data('mediciones', (iniciales) => ({
+    filas: iniciales && iniciales.length ? iniciales : [],
+    agregar() {
+        this.filas.push({ parametro: '', valor: '', unidad: '' });
+    },
+    quitar(i) {
+        this.filas.splice(i, 1);
+    },
+    // Reemplaza las tensiones (o corrientes) anteriores por las del sistema elegido
+    usarSistema(tipo, sistema) {
+        const nombre = tipo === 'tension' ? 'Tensión' : 'Corriente';
+        const unidad = tipo === 'tension' ? 'V' : 'A';
+        const sufijo = sistema === 'monofasico' ? 'monofásica' : 'trifásica';
+        this.filas = this.filas.filter((f) => !(f.parametro || '').startsWith(nombre) || f.valor);
+        PUNTOS_MEDICION[tipo][sistema].forEach((p) => this.filas.push({ parametro: `${nombre} ${sufijo} ${p}`, valor: '', unidad }));
     },
 }));
 
@@ -285,4 +345,56 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 window.Alpine = Alpine;
+// Borrador de la hoja de servicio en el navegador: los textos escritos no se pierden si se
+// recarga la página o se sale por error, y se avisa antes de salir con cambios sin guardar.
+// (Las filas dinámicas —equipos, mediciones— y los archivos no se guardan: el navegador no lo permite para archivos.)
+function borradorDeFormulario(form) {
+    const clave = `sggp:borrador:${form.dataset.borrador}`;
+    const campos = () => [...form.elements].filter((el) => el.name && el.type !== 'file' && el.type !== 'hidden'
+        && !['_token', '_method'].includes(el.name) && !el.hasAttribute('x-model') && !el.hasAttribute(':name'));
+    let modificado = false;
+    let enviando = false;
+    let espera;
+
+    const leer = () => { try { return JSON.parse(localStorage.getItem(clave) || 'null'); } catch { return null; } };
+    const guardar = () => {
+        const valores = {};
+        campos().forEach((el) => {
+            if (el.type === 'radio' || el.type === 'checkbox') { if (el.checked) valores[el.name] = el.value; } else valores[el.name] = el.value;
+        });
+        try { localStorage.setItem(clave, JSON.stringify({ fecha: new Date().toISOString(), valores })); } catch { /* sin espacio */ }
+    };
+
+    // Recuperar lo escrito (si la página no volvió con errores del servidor, que ya trae lo enviado)
+    const previo = leer();
+    if (previo && form.dataset.conErrores !== '1') {
+        campos().forEach((el) => {
+            if (!(el.name in previo.valores)) return;
+            if (el.type === 'radio' || el.type === 'checkbox') el.checked = previo.valores[el.name] === el.value;
+            else el.value = previo.valores[el.name];
+        });
+        const aviso = document.createElement('div');
+        aviso.className = 'flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900';
+        aviso.innerHTML = `<span>Se recuperó lo que había escrito el ${new Date(previo.fecha).toLocaleString('es-PE')} (borrador del navegador).</span>`;
+        const descartar = document.createElement('button');
+        descartar.type = 'button';
+        descartar.className = 'font-medium text-red-700 hover:underline';
+        descartar.textContent = 'Descartar y empezar de nuevo';
+        descartar.onclick = () => { localStorage.removeItem(clave); modificado = false; location.reload(); };
+        aviso.append(descartar);
+        form.prepend(aviso);
+    }
+
+    const alCambiar = () => { modificado = true; clearTimeout(espera); espera = setTimeout(guardar, 600); };
+    form.addEventListener('input', alCambiar);
+    form.addEventListener('change', alCambiar);
+    form.addEventListener('submit', () => { enviando = true; guardar(); });
+    window.addEventListener('beforeunload', (e) => {
+        if (modificado && !enviando) { guardar(); e.preventDefault(); e.returnValue = ''; }
+    });
+}
+document.querySelectorAll('form[data-borrador]').forEach(borradorDeFormulario);
+// Hoja guardada con éxito: se borra su borrador
+document.querySelectorAll('[data-limpiar-borrador]').forEach((el) => localStorage.removeItem(`sggp:borrador:${el.dataset.limpiarBorrador}`));
+
 Alpine.start();

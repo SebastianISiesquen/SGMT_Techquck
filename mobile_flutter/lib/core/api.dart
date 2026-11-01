@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 
 import 'archivos.dart';
+import 'borradores.dart';
 import 'modelos.dart';
 
 class ApiError implements Exception {
@@ -27,6 +29,26 @@ class Formulario {
   }
 
   void archivo(String nombre, ArchivoLocal a) => archivos.add((nombre, a));
+
+  Formulario();
+
+  /// Para guardar en el teléfono una hoja que no se pudo enviar por falta de señal.
+  Map<String, dynamic> toJson() => {
+    'campos': campos,
+    'archivos': [
+      for (final (campo, a) in archivos) {'campo': campo, 'ruta': a.ruta, 'nombre': a.nombre, 'mime': a.mime},
+    ],
+  };
+
+  Formulario.fromJson(Map<String, dynamic> j) {
+    campos.addAll(Map<String, String>.from(j['campos'] as Map? ?? {}));
+    for (final a in (j['archivos'] as List? ?? []).cast<Map>()) {
+      archivos.add((
+        '${a['campo']}',
+        ArchivoLocal(ruta: '${a['ruta']}', nombre: '${a['nombre']}', mime: '${a['mime']}', esImagen: '${a['mime']}'.startsWith('image/')),
+      ));
+    }
+  }
 }
 
 /// Cliente de la API REST del backend Laravel (autenticación Bearer con Sanctum).
@@ -45,6 +67,9 @@ class Api {
   final _almacen = const FlutterSecureStorage();
   String? _token;
   String servidor = urlPorDefecto;
+
+  /// La última consulta se respondió con datos guardados en el teléfono (no hay señal).
+  final sinConexion = ValueNotifier<bool>(false);
 
   /// Se llama cuando el servidor responde 401 (token vencido o revocado).
   void Function()? alExpirar;
@@ -90,8 +115,17 @@ class Api {
         res = await http.Response.fromStream(await req.send()).timeout(const Duration(seconds: 30));
       }
     } catch (_) {
+      // Sin señal: las consultas devuelven lo último que se descargó (si existe)
+      if (metodo == 'GET' && form == null) {
+        final copia = await CacheApi.leer(ruta);
+        if (copia != null) {
+          sinConexion.value = true;
+          return jsonDecode(copia);
+        }
+      }
       throw ApiError('No se pudo conectar con el servidor ($servidor). Verifique su conexión.', 0);
     }
+    sinConexion.value = false;
 
     if (res.statusCode == 401) {
       await _cerrarSesionLocal();
@@ -116,6 +150,7 @@ class Api {
       }
       throw ApiError(primero ?? (data is Map ? data['message']?.toString() : null) ?? 'Error ${res.statusCode}', res.statusCode);
     }
+    if (metodo == 'GET' && form == null && data != null) CacheApi.guardar(ruta, utf8.decode(res.bodyBytes));
     return data;
   }
 

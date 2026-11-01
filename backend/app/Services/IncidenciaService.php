@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\EstadoIncidencia;
 use App\Enums\ResultadoAtencion;
 use App\Models\Atencion;
+use App\Models\EquipoEvento;
 use App\Models\Incidencia;
 use App\Models\User;
 use App\Notifications\IncidenciaAsignada;
@@ -21,16 +22,22 @@ use Illuminate\Validation\ValidationException;
  */
 class IncidenciaService
 {
+    /** @param  array  $datos  incluye 'equipos': ids de los equipos con falla (puede ir vacío) */
     public function registrar(array $datos): Incidencia
     {
         return DB::transaction(function () use ($datos) {
+            $equipos = $datos['equipos'] ?? [];
+            unset($datos['equipos']);
+
             $incidencia = Incidencia::create([
                 ...$datos,
                 'estado' => EstadoIncidencia::Registrada,
                 'registrado_por' => auth()->id(),
             ]);
+            $incidencia->equipos()->sync($equipos);
 
-            $this->historial($incidencia, 'registro', null, EstadoIncidencia::Registrada, 'Incidencia registrada');
+            $this->historial($incidencia, 'registro', null, EstadoIncidencia::Registrada, 'Incidencia registrada'
+                .(count($equipos) > 1 ? ' con '.count($equipos).' equipos con falla' : ''));
             EquipoService::alRegistrarIncidencia($incidencia);
             Auditor::log('crear', 'incidencias', "Registró la incidencia {$incidencia->codigo}", $incidencia);
 
@@ -39,6 +46,63 @@ class IncidenciaService
             }
 
             return $incidencia;
+        });
+    }
+
+    /** Al editar la incidencia: los equipos agregados reciben la falla en su historial; los quitados la pierden. */
+    public function actualizarEquipos(Incidencia $incidencia, array $equipos): void
+    {
+        $cambios = $incidencia->equipos()->sync($equipos);
+
+        if ($cambios['detached']) {
+            EquipoEvento::where('incidencia_id', $incidencia->id)->where('tipo', 'falla')->whereIn('equipo_id', $cambios['detached'])->delete();
+        }
+        if ($cambios['attached'] || $cambios['detached']) {
+            EquipoService::alRegistrarIncidencia($incidencia);
+            $this->historial($incidencia, 'edicion', null, null, 'Equipos con falla: '.($incidencia->equipos()->pluck('codigo')->implode(', ') ?: 'ninguno'));
+        }
+    }
+
+    /**
+     * En la visita unos equipos quedaron reparados y otros pendientes: los pendientes pasan a una
+     * incidencia nueva (vinculada a esta, mismo técnico) y esta se resuelve con los reparados.
+     *
+     * @param  array<int>  $equiposPendientes
+     */
+    public function separarEquipos(Incidencia $incidencia, array $equiposPendientes, ?string $pendientes, $proximaVisita): Incidencia
+    {
+        return DB::transaction(function () use ($incidencia, $equiposPendientes, $pendientes, $proximaVisita) {
+            $codigos = $incidencia->equipos()->whereIn('equipos.id', $equiposPendientes)->pluck('codigo')->implode(', ');
+
+            $nueva = Incidencia::create([
+                ...$incidencia->only(['proyecto_id', 'garantia_id', 'cobertura', 'prioridad', 'canal', 'reportado_por', 'ubicacion_detalle', 'fecha_limite']),
+                'incidencia_origen_id' => $incidencia->id,
+                'titulo' => "{$incidencia->titulo} (equipos pendientes)",
+                'descripcion' => "Continúa de la incidencia {$incidencia->codigo}: equipos que quedaron pendientes ($codigos).\n"
+                    .($pendientes ? "Pendiente: $pendientes\n" : '')."\nReporte original: {$incidencia->descripcion}",
+                'fecha_reporte' => $incidencia->fecha_reporte,
+                'proxima_visita' => $proximaVisita,
+                'motivo_reprogramacion' => $pendientes,
+                'estado' => EstadoIncidencia::Registrada,
+                'registrado_por' => auth()->id(),
+            ]);
+            $nueva->equipos()->sync($equiposPendientes);
+            $incidencia->equipos()->detach($equiposPendientes);
+
+            // La falla de esos equipos pasa a la incidencia nueva (no se duplica en su historial)
+            EquipoEvento::where('incidencia_id', $incidencia->id)->where('tipo', 'falla')->whereIn('equipo_id', $equiposPendientes)
+                ->update(['incidencia_id' => $nueva->id]);
+
+            $this->historial($nueva, 'registro', null, EstadoIncidencia::Registrada, "Separada de {$incidencia->codigo} con los equipos pendientes: $codigos");
+            $this->historial($incidencia, 'separacion', null, null, "Equipos pendientes ($codigos) pasaron a la incidencia {$nueva->codigo}");
+            Auditor::log('crear', 'incidencias', "Separó los equipos pendientes de {$incidencia->codigo} en {$nueva->codigo}", $nueva);
+
+            if ($incidencia->tecnico_id) {
+                $this->asignar($nueva, User::findOrFail($incidencia->tecnico_id), $incidencia->fecha_limite,
+                    "Equipos pendientes de {$incidencia->codigo}");
+            }
+
+            return $nueva;
         });
     }
 

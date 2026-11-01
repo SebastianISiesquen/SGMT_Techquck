@@ -37,12 +37,20 @@ class HojaServicioService
      * @param  array<int, UploadedFile>  $fotos
      * @param  array<int, UploadedFile>  $actas  acta de conformidad firmada (si el cliente ya la firmó)
      * @param  array<int, string|null>  $descripciones  leyenda de cada foto (aparece en el PDF)
+     * @param  array<int, array<int, UploadedFile>>  $fotosEquipos  fotos de cada fila de equipos (mismo índice que $equipos)
      */
-    public function crear(array $datos, array $equipos = [], array $materiales = [], array $fotos = [], array $actas = [], string $origen = 'web', array $descripciones = []): HojaServicio
+    public function crear(array $datos, array $equipos = [], array $materiales = [], array $fotos = [], array $actas = [], string $origen = 'web', array $descripciones = [], array $fotosEquipos = []): HojaServicio
     {
+        // Reenvío desde la app de una hoja que ya llegó (se cortó la señal antes de la respuesta)
+        if (! empty($datos['uuid_cliente']) && $existente = HojaServicio::where('uuid_cliente', $datos['uuid_cliente'])->first()) {
+            return $existente;
+        }
+
+        // Si unos equipos quedan pendientes, lo que falta y la próxima visita pasan a la incidencia que se separa
+        $continua = ['pendientes' => $datos['pendientes'] ?? null, 'proxima_visita' => $datos['proxima_visita'] ?? null];
         $datos = $this->normalizar($this->completarDesdeIncidencia($datos));
 
-        return DB::transaction(function () use ($datos, $equipos, $materiales, $fotos, $actas, $origen, $descripciones) {
+        return DB::transaction(function () use ($datos, $equipos, $materiales, $fotos, $actas, $origen, $descripciones, $fotosEquipos, $continua) {
             $hoja = HojaServicio::create([
                 ...$datos,
                 'tecnico_id' => auth()->id(),
@@ -55,11 +63,13 @@ class HojaServicioService
             foreach ($fotos as $i => $foto) {
                 ArchivoService::guardar($foto, $hoja, ArchivoService::categoriaPara($foto, 'foto'), $descripciones[$i] ?? null);
             }
+            $this->guardarFotosDeEquipos($hoja, $equipos, $fotosEquipos);
 
             if ($hoja->incidencia) {
                 $this->incidencias->historial($hoja->incidencia, 'hoja_servicio', null, null, "Visita del {$hoja->fecha->format('d/m/Y')}: hoja {$hoja->numero}");
                 $this->registrarAtencion($hoja);
                 $this->programarSiguienteVisita($hoja);
+                $this->separarPendientes($hoja->fresh(['equipos', 'incidencia']), $continua);
             }
 
             // Visita de un plan de mantenimiento: queda como realizada con esta hoja.
@@ -170,6 +180,36 @@ class HojaServicioService
         }
     }
 
+    /** Las fotos de cada equipo quedan en la hoja, marcadas con el equipo (salen en su informe técnico). */
+    private function guardarFotosDeEquipos(HojaServicio $hoja, array $equipos, array $fotosEquipos): void
+    {
+        foreach ($fotosEquipos as $i => $fotos) {
+            $equipoId = $equipos[$i]['equipo_id'] ?? null;
+            foreach ($equipoId ? (array) $fotos : [] as $foto) {
+                ArchivoService::guardar($foto, $hoja, 'foto', $equipos[$i]['codigo'] ?? null)->update(['equipo_id' => $equipoId]);
+            }
+        }
+    }
+
+    /**
+     * Visita con resultados distintos por equipo: si unos quedaron reparados y otros pendientes,
+     * los pendientes pasan a una incidencia nueva y esta queda resuelta con los reparados.
+     */
+    private function separarPendientes(HojaServicio $hoja, array $continua): void
+    {
+        $inc = $hoja->incidencia;
+        $deLaIncidencia = $inc->equipos()->pluck('equipos.id');
+        $filas = $hoja->equipos->filter(fn ($f) => $f->resultado && $deLaIncidencia->contains($f->equipo_id));
+
+        $pendientes = $filas->filter(fn ($f) => $f->resultado->requiereVisita())->pluck('equipo_id')->unique()->values();
+        if ($pendientes->isEmpty() || $pendientes->count() === $filas->count()) {
+            return;
+        }
+
+        $nueva = $this->incidencias->separarEquipos($inc, $pendientes->all(), $continua['pendientes'], $continua['proxima_visita']);
+        $this->incidencias->historial($inc, 'hoja_servicio', null, null, "Hoja {$hoja->numero}: equipos reparados; los pendientes continúan en {$nueva->codigo}");
+    }
+
     /** Si viene de una incidencia, el proyecto y la garantía se toman de ella. */
     private function completarDesdeIncidencia(array $datos): array
     {
@@ -193,6 +233,12 @@ class HojaServicioService
             $datos['verificaciones'] = collect($datos['verificaciones'] ?? [])
                 ->filter(fn ($v) => filled($v['item'] ?? null) && filled($v['resultado'] ?? null))
                 ->map(fn ($v) => ['item' => $v['item'], 'resultado' => $v['resultado']])->values()->all() ?: null;
+        }
+
+        if (array_key_exists('evaluacion', $datos)) {
+            $datos['evaluacion'] = collect($datos['evaluacion'] ?? [])
+                ->filter(fn ($e) => filled($e['item'] ?? null) && filled($e['observacion'] ?? null))
+                ->map(fn ($e) => ['item' => $e['item'], 'observacion' => trim($e['observacion'])])->values()->all() ?: null;
         }
 
         if (array_key_exists('mediciones', $datos)) {

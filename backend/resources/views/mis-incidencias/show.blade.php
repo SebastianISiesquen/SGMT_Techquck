@@ -32,7 +32,7 @@
                         <div><dt>Cliente (lugar del servicio)</dt><dd>{{ $lugar->nombre }}
                             @if ($incidencia->proyecto->clienteFinal)<span class="block text-xs text-slate-500">Contratado por {{ $incidencia->proyecto->entidad->nombre }}</span>@endif</dd></div>
                         <div><dt>Proyecto / servicio</dt><dd>{{ $incidencia->proyecto->nombre }}</dd></div>
-                        <div><dt>Ubicación / equipo</dt><dd>{{ $incidencia->ubicacion_detalle ?? $incidencia->equipo?->ubicacion ?? $incidencia->proyecto->ubicacion ?? '—' }}</dd></div>
+                        <div><dt>Ubicación / equipo</dt><dd>{{ $incidencia->ubicacion_detalle ?? $incidencia->equipos->pluck('ubicacion')->filter()->unique()->implode(' · ') ?: ($incidencia->proyecto->ubicacion ?? '—') }}</dd></div>
                         <div><dt>Contacto en el cliente</dt><dd>{{ $incidencia->reportado_por ?? $lugar->contacto_nombre ?? '—' }}
                             @if ($lugar->contacto_telefono)
                                 <a href="tel:{{ $lugar->contacto_telefono }}" class="ml-1 text-brand-600">{{ $lugar->contacto_telefono }}</a>

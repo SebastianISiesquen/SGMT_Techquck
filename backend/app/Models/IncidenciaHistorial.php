@@ -24,6 +24,7 @@ class IncidenciaHistorial extends Model
         'anulacion' => 'Anulación',
         'hoja_servicio' => 'Hoja de servicio',
         'reprogramacion' => 'Próxima visita',
+        'separacion' => 'Equipos pendientes separados',
     ];
 
     protected $fillable = ['incidencia_id', 'user_id', 'accion', 'estado_anterior', 'estado_nuevo', 'detalle'];

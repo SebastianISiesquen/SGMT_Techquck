@@ -5,6 +5,10 @@
     $resColor = ['resuelto' => 'green', 'parcial' => 'amber', 'pendiente_repuesto' => 'blue', 'no_procede' => 'red'];
 @endphp
 <x-layouts.app :title="$hoja->numero">
+    {{-- La hoja se guardó: se borra el borrador que el navegador tenía de esta visita --}}
+    @if (session('ok'))
+        <div hidden data-limpiar-borrador="{{ \App\Models\HojaServicio::claveBorrador($hoja->incidencia_id, $hoja->mantenimiento_id, $hoja->proyecto_id) }}"></div>
+    @endif
     <x-page-header :title="'Hoja de servicio '.$hoja->numero" :subtitle="$hoja->tipo_servicio->label().' · '.$hoja->proyecto->lugarDeServicio()->nombre.' · '.$hoja->fecha->format('d/m/Y')" :back="$hoja->incidencia ? route('incidencias.show', $hoja->incidencia) : route('hojas.index')">
         <x-slot:actions>
             <a href="{{ route('hojas.pdf', $hoja) }}" target="_blank" class="btn btn-primary"><x-icon name="printer" class="size-4" /> Imprimir / PDF</a>
@@ -79,6 +83,17 @@
                 </dl>
             </div>
 
+            @if ($hoja->evaluacion)
+                <div class="card">
+                    <div class="card-header"><h3 class="card-title">Evaluación preliminar del sitio</h3></div>
+                    <dl class="card-body grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+                        @foreach ($hoja->evaluacion as $e)
+                            <div><dt class="text-xs font-medium uppercase tracking-wide text-slate-500">{{ $e['item'] }}</dt><dd class="text-slate-800">{{ $e['observacion'] }}</dd></div>
+                        @endforeach
+                    </dl>
+                </div>
+            @endif
+
             @if ($hoja->verificaciones || $hoja->mediciones)
                 <div class="grid gap-6 md:grid-cols-2">
                     @if ($hoja->verificaciones)
@@ -121,7 +136,9 @@
                                     <p class="text-xs text-slate-500">{{ $e->ubicacion }}</p></td>
                                 <td>{{ trim($e->marca.' '.$e->modelo) ?: '—' }}</td>
                                 <td class="font-mono text-xs">{{ $e->serie ?? '—' }}</td>
-                                <td>{{ $e->accionLabel() }}</td>
+                                <td>{{ $e->accionLabel() }}
+                                    @if ($e->resultado)<x-badge :color="$e->resultado->color()" class="mt-1">{{ $e->resultado->label() }}</x-badge>@endif
+                                    @if ($e->diagnostico)<p class="mt-1 text-xs text-slate-600"><span class="font-medium">Diagnóstico:</span> {{ $e->diagnostico }}</p>@endif</td>
                                 <td><x-badge :color="['operativo' => 'green', 'observado' => 'amber', 'inoperativo' => 'red'][$e->estado_final] ?? 'slate'">{{ $e->estadoLabel() }}</x-badge>
                                     @if ($e->observacion)<p class="mt-1 text-xs text-slate-500">{{ $e->observacion }}</p>@endif
                                     @if ($e->checklist)

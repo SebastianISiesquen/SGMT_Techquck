@@ -37,6 +37,7 @@ class HojaServicioResource extends JsonResource
             'pendientes' => $this->pendientes,
             'proxima_visita' => $this->proxima_visita?->toDateString(),
             'verificaciones' => $this->verificaciones ?? [],
+            'evaluacion' => $this->evaluacion ?? [],
             'mediciones' => $this->mediciones ?? [],
             'proyecto' => ['id' => $this->proyecto->id, 'nombre' => $this->proyecto->nombre, 'entidad' => $this->proyecto->lugarDeServicio()->nombre],
             'mantenimiento' => $this->whenLoaded('mantenimiento', fn () => $this->mantenimiento?->etiqueta()),
@@ -45,6 +46,7 @@ class HojaServicioResource extends JsonResource
             'equipos' => $this->whenLoaded('equipos', fn () => $this->equipos->map(fn ($e) => [
                 'equipo_id' => $e->equipo_id, 'equipo' => $e->equipo, 'marca' => $e->marca, 'modelo' => $e->modelo, 'serie' => $e->serie,
                 'accion' => $e->accionLabel(), 'estado_final' => $e->estadoLabel(), 'observacion' => $e->observacion,
+                'diagnostico' => $e->diagnostico, 'resultado' => $e->resultado?->value, 'resultado_label' => $e->resultado?->label(),
                 'checklist' => $e->checklist ?? [],
             ])),
             'materiales' => $this->whenLoaded('materiales', fn () => $this->materiales->map(fn ($m) => [

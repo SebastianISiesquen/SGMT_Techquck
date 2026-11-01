@@ -202,7 +202,7 @@ class EquiposYMantenimientosTest extends TestCase
         // Falla reportada sobre el equipo y atención del técnico
         $incidencias = app(IncidenciaService::class);
         $inc = $incidencias->registrar([
-            'proyecto_id' => $this->proyecto->id, 'garantia_id' => $this->garantia->id, 'equipo_id' => $laptop->id, 'cobertura' => 'contrato',
+            'proyecto_id' => $this->proyecto->id, 'garantia_id' => $this->garantia->id, 'equipos' => [$laptop->id], 'cobertura' => 'contrato',
             'titulo' => 'Laptop lenta', 'descripcion' => 'Errores de disco', 'prioridad' => 'alta',
             'fecha_reporte' => now()->subHours(3), 'tecnico_id' => $this->tecnico->id,
         ]);
@@ -247,7 +247,7 @@ class EquiposYMantenimientosTest extends TestCase
         $this->getJson('/api/equipos/codigo/'.urlencode($laptop->contenidoQr()), ['Authorization' => "Bearer $token"])
             ->assertOk()->assertJsonPath('data.codigo', $laptop->codigo)->assertJsonCount(4, 'data.eventos');
         $this->getJson("/api/incidencias/{$inc->id}", ['Authorization' => "Bearer $token"])
-            ->assertOk()->assertJsonPath('data.equipo.codigo', $laptop->codigo)->assertJsonPath('data.cobertura', 'contrato');
+            ->assertOk()->assertJsonPath('data.equipos.0.codigo', $laptop->codigo)->assertJsonPath('data.cobertura', 'contrato');
     }
 
     public function test_las_visitas_del_plan_no_pasan_la_vigencia_de_la_garantia(): void

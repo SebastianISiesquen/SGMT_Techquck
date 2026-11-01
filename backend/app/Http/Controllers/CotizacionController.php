@@ -35,8 +35,8 @@ class CotizacionController extends Controller
 
     public function create(Request $request)
     {
-        $incidencia = Incidencia::with(['proyecto', 'equipo', 'atenciones'])->find($request->incidencia_id);
-        $equipo = $incidencia?->equipo ?? Equipo::find($request->equipo_id);
+        $incidencia = Incidencia::with(['proyecto', 'equipos', 'atenciones'])->find($request->incidencia_id);
+        $equipo = Equipo::find($request->equipo_id) ?? ($incidencia?->equipos->count() === 1 ? $incidencia->equipos->first() : null);
         $ultima = $incidencia?->atenciones->first();
 
         $cotizacion = new Cotizacion([

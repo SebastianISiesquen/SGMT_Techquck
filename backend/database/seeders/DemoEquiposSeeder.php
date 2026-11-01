@@ -84,7 +84,7 @@ class DemoEquiposSeeder extends Seeder
         ]);
         $incidencias = app(IncidenciaService::class);
         $inc = $incidencias->registrar([
-            'proyecto_id' => $servicio->id, 'garantia_id' => $garServicio->id, 'equipo_id' => $critica->id, 'cobertura' => 'contrato',
+            'proyecto_id' => $servicio->id, 'garantia_id' => $garServicio->id, 'equipos' => [$critica->id], 'cobertura' => 'contrato',
             'titulo' => 'Laptop muy lenta y con errores al iniciar', 'descripcion' => 'La usuaria indica que la laptop demora más de 10 minutos en encender y muestra errores de disco.',
             'prioridad' => 'alta', 'canal' => 'WhatsApp', 'reportado_por' => $critica->responsable,
             'fecha_reporte' => $plan->fecha_inicio->copy()->addMonths(2)->setTime(9, 15), 'tecnico_id' => $tecnico->id,

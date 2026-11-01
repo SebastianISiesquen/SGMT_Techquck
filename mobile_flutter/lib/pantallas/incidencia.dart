@@ -3,6 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../core/api.dart';
 import '../core/archivos.dart';
+import '../core/borradores.dart';
 import '../core/modelos.dart';
 import '../core/tema.dart';
 import '../widgets/ui.dart';
@@ -21,6 +22,9 @@ class IncidenciaPantalla extends StatefulWidget {
 
 class _IncidenciaPantallaState extends State<IncidenciaPantalla> {
   Incidencia? _inc;
+
+  /// Hoja de servicio a medio llenar guardada en el teléfono.
+  Borrador? _borrador;
   String _accion = '';
 
   @override
@@ -32,7 +36,13 @@ class _IncidenciaPantallaState extends State<IncidenciaPantalla> {
   Future<void> _cargar() async {
     try {
       final inc = await Api.i.incidencia(widget.id);
-      if (mounted) setState(() => _inc = inc);
+      final borrador = await Borradores.leer('inc_${widget.id}');
+      if (mounted) {
+        setState(() {
+          _inc = inc;
+          _borrador = borrador;
+        });
+      }
     } catch (e) {
       if (mounted) mensaje(context, 'Error', '$e');
     }
@@ -80,7 +90,10 @@ class _IncidenciaPantallaState extends State<IncidenciaPantalla> {
   Widget build(BuildContext context) {
     final inc = _inc;
     if (inc == null) {
-      return Scaffold(appBar: AppBar(title: const Text('Incidencia')), body: const Cargando());
+      return Scaffold(
+        appBar: AppBar(title: const Text('Incidencia')),
+        body: const Cargando(),
+      );
     }
 
     final puedeAdjuntar = ['asignada', 'en_proceso', 'resuelta'].contains(inc.estado);
@@ -152,7 +165,15 @@ class _IncidenciaPantallaState extends State<IncidenciaPantalla> {
               const SizedBox(height: 10),
             ],
             if (inc.puedeAtender) ...[
-              Boton('Registrar visita (hoja de servicio)', icono: Icons.assignment_outlined, onPressed: () => _abrir(nuevaHoja)),
+              Boton(
+                _borrador == null
+                    ? 'Registrar visita (hoja de servicio)'
+                    : _borrador!.pendienteDeEnvio
+                    ? 'Visita pendiente de envío'
+                    : 'Continuar visita (borrador)',
+                icono: _borrador == null ? Icons.assignment_outlined : Icons.edit_note,
+                onPressed: () => _abrir(nuevaHoja),
+              ),
               const SizedBox(height: 10),
             ],
             if (puedeAdjuntar) ...[
@@ -193,7 +214,23 @@ class _IncidenciaPantallaState extends State<IncidenciaPantalla> {
               const Aviso(children: [Text('Para cerrar, el supervisor necesita el acta de conformidad firmada por el cliente.')]),
             const SizedBox(height: 6),
 
-            if (inc.equipo != null) _tarjetaEquipo(inc.equipo!),
+            // Equipos que quedaron pendientes en otra visita: de dónde vienen o a dónde pasaron
+            if (inc.origen != null)
+              Aviso(tono: 'blue', children: [Text('Estos equipos quedaron pendientes en la incidencia ${inc.origen!.codigo}.')]),
+            for (final d in inc.derivadas)
+              Aviso(
+                tono: 'blue',
+                children: [
+                  InkWell(
+                    onTap: () => _abrir(IncidenciaPantalla(id: d.id)),
+                    child: Text(
+                      'Los equipos pendientes continúan en la incidencia ${d.codigo}  ›',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
+              ),
+            if (inc.equipos.isNotEmpty) _tarjetaEquipos(inc.equipos),
 
             Tarjeta(
               titulo: 'Lugar y contacto',
@@ -339,51 +376,63 @@ class _IncidenciaPantallaState extends State<IncidenciaPantalla> {
     );
   }
 
-  Widget _tarjetaEquipo(EquipoIncidencia e) {
-    void verHistorial() => _abrir(EquipoPantalla(id: e.id));
+  /// Equipos con falla: una incidencia puede afectar a varios equipos, cada uno con sus antecedentes.
+  Widget _tarjetaEquipos(List<EquipoIncidencia> equipos) {
     return Tarjeta(
-      titulo: 'Equipo afectado',
+      titulo: equipos.length == 1 ? 'Equipo afectado' : 'Equipos afectados (${equipos.length})',
       children: [
-        InkWell(
-          onTap: verHistorial,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '${e.codigo} · ${e.nombre}',
-                style: const TextStyle(fontWeight: FontWeight.w700, color: C.text),
-              ),
-              Text([e.ubicacion, e.responsable].whereType<String>().join(' · '), style: const TextStyle(color: C.textMuted, fontSize: 13)),
-            ],
-          ),
-        ),
-        const SizedBox(height: 10),
-        if (e.antecedentes.isEmpty)
-          const Text('Sin antecedentes registrados.', style: TextStyle(color: C.textMuted, fontSize: 13))
-        else
-          Aviso(
-            children: [
-              const Text('Antecedentes del equipo', style: TextStyle(fontWeight: FontWeight.w700)),
-              const SizedBox(height: 6),
-              for (final a in e.antecedentes)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Text.rich(
-                    TextSpan(
-                      style: const TextStyle(fontSize: 13),
-                      children: [
-                        TextSpan(
-                          text: '${fecha(a.fecha, hora: false)} · ${a.tipoLabel}: ',
-                          style: const TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                        TextSpan(text: a.titulo),
-                      ],
-                    ),
+        for (final (i, e) in equipos.indexed)
+          Container(
+            width: double.infinity,
+            padding: EdgeInsets.only(top: i == 0 ? 0 : 12, bottom: 12),
+            decoration: BoxDecoration(
+              border: i == 0 ? null : const Border(top: BorderSide(color: C.border)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                InkWell(
+                  onTap: () => _abrir(EquipoPantalla(id: e.id)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${e.codigo} · ${e.nombre}  ›',
+                        style: const TextStyle(fontWeight: FontWeight.w700, color: C.text),
+                      ),
+                      Text([e.ubicacion, e.responsable].whereType<String>().join(' · '), style: const TextStyle(color: C.textMuted, fontSize: 13)),
+                    ],
                   ),
                 ),
-            ],
+                const SizedBox(height: 8),
+                if (e.antecedentes.isEmpty)
+                  const Text('Sin antecedentes registrados.', style: TextStyle(color: C.textMuted, fontSize: 13))
+                else
+                  Aviso(
+                    children: [
+                      const Text('Antecedentes del equipo', style: TextStyle(fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 6),
+                      for (final a in e.antecedentes)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Text.rich(
+                            TextSpan(
+                              style: const TextStyle(fontSize: 13),
+                              children: [
+                                TextSpan(
+                                  text: '${fecha(a.fecha, hora: false)} · ${a.tipoLabel}: ',
+                                  style: const TextStyle(fontWeight: FontWeight.w700),
+                                ),
+                                TextSpan(text: a.titulo),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+              ],
+            ),
           ),
-        Boton('Ver historial completo', variante: Variante.secondary, icono: Icons.history, onPressed: verHistorial),
       ],
     );
   }

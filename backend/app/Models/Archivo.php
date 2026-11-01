@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
 class Archivo extends Model
 {
     protected $fillable = [
-        'archivable_type', 'archivable_id', 'categoria', 'nombre_original', 'ruta', 'mime',
+        'archivable_type', 'archivable_id', 'equipo_id', 'categoria', 'nombre_original', 'ruta', 'mime',
         'tamano', 'descripcion', 'subido_por',
     ];
 

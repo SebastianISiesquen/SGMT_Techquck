@@ -61,10 +61,18 @@
     @endif
 </table>
 
-{{-- Verificaciones previas de seguridad --}}
-@if ($hoja->verificaciones)
+{{-- Evaluación preliminar: condiciones del sitio y verificaciones previas de seguridad --}}
+@if ($hoja->evaluacion || $hoja->verificaciones)
     <div class="seccion evitar-corte">
-        <div class="seccion-titulo"><span class="n">{{ ++$n }}</span>EVALUACIÓN PRELIMINAR · VERIFICACIONES PREVIAS EN SITIO</div>
+        <div class="seccion-titulo"><span class="n">{{ ++$n }}</span>EVALUACIÓN PRELIMINAR · CONDICIONES DEL SITIO Y VERIFICACIONES PREVIAS</div>
+        @if ($hoja->evaluacion)
+            <table>
+                @foreach ($hoja->evaluacion as $e)
+                    <tr><td style="width: 26%;" class="muted">{{ $e['item'] }}</td><td>{{ $e['observacion'] }}</td></tr>
+                @endforeach
+            </table>
+        @endif
+        @if ($hoja->verificaciones)
         <div class="seccion-cuerpo">
             <table class="sin-borde">
                 @foreach (collect($hoja->verificaciones)->chunk((int) ceil(count($hoja->verificaciones) / 2)) as $col)
@@ -79,6 +87,7 @@
                 @endforeach
             </table>
         </div>
+        @endif
     </div>
 @endif
 
